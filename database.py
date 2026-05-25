@@ -107,7 +107,8 @@ class CognitiveFingerprint(Base):
     user_id = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     session_count = Column(Integer, default=0, nullable=False)
-    profile_json = Column(Text, nullable=True)  # serialized FingerprintProfile
+    profile_json = Column(Text, nullable=True)      # serialized FingerprintProfile
+    bandit_state_json = Column(Text, nullable=True)  # serialized LinUCBRecommender
 
     user = relationship("User", back_populates="fingerprint")
 

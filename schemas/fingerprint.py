@@ -55,6 +55,30 @@ class OptimalConditions(BaseModel):
     duration_score_correlation: Optional[float] = None  # Pearson r (duration vs quiz_score)
 
 
+class BayesianStabilityStats(BaseModel):
+    """
+    Per-technique posterior over the Ebbinghaus stability parameter S,
+    computed by Metropolis-Hastings MCMC under the hierarchical population prior.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    technique: str
+    posterior_mean_days: float
+    """E[S | data, population] — posterior mean stability in days."""
+    posterior_median_days: float
+    """Posterior median (more robust than mean for skewed log-normal posteriors)."""
+    posterior_std_days: float
+    """Posterior standard deviation — proxy for estimation uncertainty."""
+    ci_lower_days: float
+    """2.5th percentile of the posterior — lower bound of 95% credible interval."""
+    ci_upper_days: float
+    """97.5th percentile of the posterior — upper bound of 95% credible interval."""
+    n_observations: int
+    """Number of (t, R) pairs used (each 24h/7d check is one observation)."""
+    population_informed: bool
+    """True when individual retention data was available; False = pure prior sample."""
+
+
 class FingerprintProfile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -70,6 +94,16 @@ class FingerprintProfile(BaseModel):
     avg_score_trend_per_week: Optional[float] = None
     memory_profiles: List[TechniqueMemoryProfile] = Field(
         default_factory=list,
-        description="Per-technique Ebbinghaus forgetting-curve fits. "
+        description="Per-technique Ebbinghaus forgetting-curve fits (OLS). "
                     "Populated directly from measured retention data — not LLM-generated.",
+    )
+    technique_stability: List[BayesianStabilityStats] = Field(
+        default_factory=list,
+        description="Per-technique MCMC posterior over S under the hierarchical prior. "
+                    "Provides credible intervals and uncertainty quantification.",
+    )
+    bandit_expected_rewards: dict = Field(
+        default_factory=dict,
+        description="LinUCB expected reward θ̂ᵀx per technique at neutral conditions. "
+                    "Higher = bandit predicts better retention for this user's patterns.",
     )

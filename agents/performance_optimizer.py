@@ -1,6 +1,22 @@
+"""
+LEGACY — no longer used by the active pipeline.
+
+Agent 2 (cognitive fingerprint synthesis) has been replaced by the
+pure-Python pipeline in personalization/fingerprint_builder.py, which uses:
+  • Hierarchical Bayesian MCMC  (personalization/hierarchical_memory.py)
+  • LinUCB contextual bandit    (personalization/linucb.py)
+  • Rule-based insight engine   (fingerprint_builder._generate_insights)
+
+This file is kept for reference and can be re-enabled as an "enhanced" mode
+(e.g. for generating natural-language narratives from computed stats) if a
+Claude API key is available.
+"""
 import json
 
-import anthropic
+try:
+    import anthropic
+except ImportError:
+    anthropic = None  # type: ignore[assignment]
 
 from schemas.fingerprint import ConfidenceLevel, FingerprintProfile
 

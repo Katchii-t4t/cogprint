@@ -59,6 +59,34 @@ export interface OptimalConditions {
   duration_score_correlation: number | null;
 }
 
+export interface TechniqueMemoryProfile {
+  technique: string;
+  avg_stability_days: number;
+  stability_label: string;
+  predicted_retention_7d: number;
+  optimal_review_interval_days: number;
+  sessions_with_curve_data: number;
+  avg_7d_retention: number | null;
+}
+
+export interface BayesianStabilityStats {
+  technique: string;
+  /** E[S | data, population] — posterior mean stability in days */
+  posterior_mean_days: number;
+  /** Posterior median — more robust than mean for skewed distributions */
+  posterior_median_days: number;
+  /** Posterior std — proxy for estimation uncertainty */
+  posterior_std_days: number;
+  /** Lower bound of 95% credible interval */
+  ci_lower_days: number;
+  /** Upper bound of 95% credible interval */
+  ci_upper_days: number;
+  /** Number of (t, R) observations used */
+  n_observations: number;
+  /** True when individual data was available; false = pure prior sample */
+  population_informed: boolean;
+}
+
 export interface FingerprintProfile {
   session_count: number;
   confidence: ConfidenceLevel;
@@ -70,6 +98,12 @@ export interface FingerprintProfile {
   data_gaps: string[];
   improving_over_time: boolean | null;
   avg_score_trend_per_week: number | null;
+  /** Per-technique Ebbinghaus OLS fits from measured retention data */
+  memory_profiles: TechniqueMemoryProfile[];
+  /** Per-technique MCMC posterior over S under the hierarchical population prior */
+  technique_stability: BayesianStabilityStats[];
+  /** LinUCB expected reward θ̂ᵀx per technique at neutral conditions */
+  bandit_expected_rewards: Record<string, number>;
 }
 
 export interface FingerprintResponse {
