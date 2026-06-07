@@ -310,7 +310,3 @@ function CorrRow({
     </div>
   );
 }
-
-function corr(v: number) {
-  return `${v >= 0 ? "+" : ""}${v.toFixed(2)}`;
-}

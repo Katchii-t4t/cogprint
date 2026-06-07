@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { exportCSV, updatePostTest } from "../api";
 
 const RESEARCHER_PASSWORD = import.meta.env.VITE_RESEARCHER_PASSWORD ?? "cogprint2025";
-const BASE = "/api";
+const BASE = import.meta.env.VITE_API_BASE ?? "/api";
 
 interface ParticipantRow {
   id: number;

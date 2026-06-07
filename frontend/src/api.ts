@@ -8,7 +8,9 @@ import type {
   User,
 } from "./types";
 
-const BASE = "/api";
+// Default "/api" uses the Vite dev proxy (see vite.config.ts). For a deploy,
+// set VITE_API_BASE to the backend's absolute URL at build time.
+const BASE = import.meta.env.VITE_API_BASE ?? "/api";
 
 async function req<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
