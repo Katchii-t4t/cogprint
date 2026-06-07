@@ -21,6 +21,7 @@ from database import (
     get_db,
     init_db,
 )
+from auth import require_api_key
 from personalization.fingerprint_builder import load_profile, rebuild_fingerprint
 from schemas.fingerprint import ConfidenceLevel, FingerprintProfile
 from schemas.session import (
@@ -96,9 +97,12 @@ def create_user(body: UserCreate, db: Session = Depends(get_db)):
     return user
 
 
-@app.get("/users/all")
+@app.get("/users/all", dependencies=[Depends(require_api_key)])
 def list_all_users(db: Session = Depends(get_db)):
-    """Return all users with their session counts — for the researcher dashboard."""
+    """Return all users with their session counts — for the researcher dashboard.
+
+    Protected by the optional API key (see auth.py): exposes every participant.
+    """
     users = db.query(User).order_by(User.id).all()
     result = []
     for u in users:
@@ -318,7 +322,7 @@ def generate_study_plan(
 # Research data export (CSV)
 # ---------------------------------------------------------------------------
 
-@app.get("/export/study-data")
+@app.get("/export/study-data", dependencies=[Depends(require_api_key)])
 def export_study_data(
     group: Optional[str] = None,
     db: Session = Depends(get_db),
