@@ -8,8 +8,11 @@ from typing import List, Optional
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from auth import require_api_key
+from config import RETENTION_SCHEDULE
 from database import (
     CognitiveFingerprint,
     Material,
@@ -21,7 +24,6 @@ from database import (
     get_db,
     init_db,
 )
-from auth import require_api_key
 from personalization.fingerprint_builder import load_profile, rebuild_fingerprint
 from schemas.fingerprint import ConfidenceLevel, FingerprintProfile
 from schemas.session import (
@@ -416,16 +418,9 @@ def list_sessions(user_id: int, db: Session = Depends(get_db)):
 # Pending retention checks
 # ---------------------------------------------------------------------------
 
-class PendingCheck(BaseModel if False else object):
-    pass
-
-
-from pydantic import BaseModel as _Base
-
-
-class PendingCheckItem(_Base):
+class PendingCheckItem(BaseModel):
     session_id: int
-    check_type: str       # "24h" or "7d"
+    check_type: str       # one of config.CHECK_TYPE_KEYS
     session_date: datetime
     due_date: datetime
 
@@ -446,19 +441,16 @@ def get_pending_checks(user_id: int, db: Session = Depends(get_db)) -> List[Pend
 
     now = datetime.utcnow()
     pending: list[PendingCheckItem] = []
+    # Iterate the locked schedule (config.RETENTION_SCHEDULE) so adding or moving
+    # a checkpoint is a single edit in config.py, not scattered branches here.
     for s in sessions:
-        due_24h = s.created_at + timedelta(hours=24)
-        due_7d = s.created_at + timedelta(days=7)
-        if now >= due_24h and (s.id, "24h") not in done_checks:
-            pending.append(PendingCheckItem(
-                session_id=s.id, check_type="24h",
-                session_date=s.created_at, due_date=due_24h,
-            ))
-        if now >= due_7d and (s.id, "7d") not in done_checks:
-            pending.append(PendingCheckItem(
-                session_id=s.id, check_type="7d",
-                session_date=s.created_at, due_date=due_7d,
-            ))
+        for cp in RETENTION_SCHEDULE:
+            due = s.created_at + cp.delay
+            if now >= due and (s.id, cp.key) not in done_checks:
+                pending.append(PendingCheckItem(
+                    session_id=s.id, check_type=cp.key,
+                    session_date=s.created_at, due_date=due,
+                ))
 
     return pending
 

@@ -3,6 +3,7 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
+from config import CHECK_TYPE_KEYS
 from database import StudyGroup, StudyTechnique, TimeOfDay
 from schemas.fingerprint import FingerprintProfile
 
@@ -28,14 +29,14 @@ class SessionCreate(BaseModel):
 class RetentionCheckCreate(BaseModel):
     session_id: int
     user_id: int
-    check_type: str  # "24h" or "7d"
+    check_type: str  # one of config.CHECK_TYPE_KEYS (currently "24h" / "7d")
     score: float = Field(ge=0.0, le=1.0)
 
     @field_validator("check_type")
     @classmethod
     def validate_check_type(cls, v: str) -> str:
-        if v not in ("24h", "7d"):
-            raise ValueError("check_type must be '24h' or '7d'")
+        if v not in CHECK_TYPE_KEYS:
+            raise ValueError(f"check_type must be one of {CHECK_TYPE_KEYS}")
         return v
 
 
