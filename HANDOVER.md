@@ -319,7 +319,29 @@ cd frontend && npx tsc --noEmit
 | Date | Machine / who | Area | Status |
 |---|---|---|---|
 | 2026-06-07 | Bot A (Karthik's PC) | Initial handover docs (README + HANDOVER) committed | ✅ done |
-| 2026-06-07 | Bot B (sgkar's PC) | Production-hardening pass: env CORS, BackgroundTasks rebuild, optional API-key auth, retention-schedule config module, audit forgetting_curve/serializer, pytest suite | 🔧 in progress |
+| 2026-06-07 | Bot B (sgkar's PC) | Production-hardening pass (see below) | ✅ done |
+
+**Bot B pass — what landed (commits `0e0acd7`..`6501f8d`):**
+- **Env-configurable CORS** (`CORS_ORIGINS`) — unblocks the deployed frontend.
+- **Fingerprint rebuild → `BackgroundTasks`** — POST /sessions & /retention-checks
+  no longer block on the MCMC pipeline.
+- **Optional API-key auth** (`auth.py`, `COGPRINT_API_KEY`) on `/users/all` and
+  `/export/study-data` — no-op unless the env var is set (local dev unaffected).
+- **`config.py`** — single source of truth for the retention schedule (pending-checks
+  + validation read it). **The 24h/7d ↔ day1/5/10/30 discrepancy is NOT resolved** —
+  it is a scientific call left for the 19 June advisor meeting; see
+  `RETENTION_SCHEDULE_DECISION.md`.
+- **Audited** `forgetting_curve.py` (correct) and `serializer.py` (fixed a wrong
+  return-type annotation on dormant legacy code).
+- **`requirements.txt`** — added missing `numpy`; `pytest`+`httpx` for tests.
+- **Test suite** (`tests/`, 19 tests) — was zero. `python -m pytest`.
+- Removed dead `PendingCheck` no-op class in `main.py`.
+
+**Still open for the other bot / next session:** create GitHub repo ✅ (done),
+deploy the research frontend, move rebuild to a real task queue (Celery) if load
+grows, add per-participant tokens (current auth only guards bulk-data endpoints),
+wire retention reminders/notifications, and resolve the retention-schedule
+decision above. Postgres + Alembic when leaving SQLite.
 
 ---
 

@@ -46,7 +46,10 @@ uvicorn main:app --reload
 #   → API:      http://localhost:8000
 #   → Swagger:  http://localhost:8000/docs
 
-# 4. Run the research-platform frontend (separate terminal)
+# 4. Run the tests (19 tests, all API-free)
+python -m pytest
+
+# 5. Run the research-platform frontend (separate terminal)
 cd frontend
 npm install
 npm run dev
@@ -55,6 +58,19 @@ npm run dev
 
 The SQLite database (`cogprint.db`) is created automatically on first run. It is
 **git-ignored** — each machine has its own local data.
+
+### Configuration (env vars — all optional for local dev)
+
+| Var | Default | Purpose |
+|---|---|---|
+| `DATABASE_URL` | `sqlite:///./cogprint.db` | Swap to Postgres for a deploy |
+| `CORS_ORIGINS` | `localhost:5173,4173` | Comma-separated allowed frontend origins |
+| `COGPRINT_API_KEY` | _unset_ | If set, `/users/all` & `/export/study-data` require an `X-API-Key` header (bulk-data protection). Unset = open (fine for local/closed pilot). |
+
+> ⚠️ **Retention schedule is an open decision** — see
+> [`RETENTION_SCHEDULE_DECISION.md`](./RETENTION_SCHEDULE_DECISION.md). The code is
+> built around 24h/7d; the study materials use day 1/5/10/30. Lock one before
+> collecting data. `config.py` centralises the scheduling half.
 
 ---
 
