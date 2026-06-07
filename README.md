@@ -11,6 +11,9 @@ separate repo: [`cogprint-site`](https://github.com/Katchii-t4t/cogprint-site).
 📄 **Read [`HANDOVER.md`](./HANDOVER.md) for the full technical state, architecture deep-dive,
 what's done / pending / broken, and the two-machine collaboration workflow.**
 
+🚀 **Building the consumer app?** Start with [`CONSUMER_APP_BUILD.md`](./CONSUMER_APP_BUILD.md) —
+the vision, the 4-screen MVP plan, the API contract, and the real/sham architecture.
+
 ---
 
 ## What this system does
