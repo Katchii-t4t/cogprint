@@ -319,7 +319,7 @@ cd frontend && npx tsc --noEmit
 | Date | Machine / who | Area | Status |
 |---|---|---|---|
 | 2026-06-07 | Bot A (Karthik's PC) | Initial handover docs (README + HANDOVER) committed | ✅ done |
-| _add yours…_ | | | |
+| 2026-06-07 | Bot B (sgkar's PC) | Production-hardening pass: env CORS, BackgroundTasks rebuild, optional API-key auth, retention-schedule config module, audit forgetting_curve/serializer, pytest suite | 🔧 in progress |
 
 ---
 

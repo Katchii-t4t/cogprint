@@ -1,10 +1,11 @@
 import csv
 import io
 import json
+import os
 from datetime import datetime, timedelta
 from typing import List, Optional
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
@@ -38,9 +39,20 @@ from schemas.session import (
 
 app = FastAPI(title="CogPrint API", version="0.1.0")
 
+# CORS origins are configurable so the deployed research frontend can talk to the
+# API without a code change. Set CORS_ORIGINS to a comma-separated list of URLs,
+# e.g. CORS_ORIGINS="https://research.cogprint.app,http://localhost:5173".
+# Defaults to the local Vite dev/preview ports for zero-config local development.
+_default_origins = "http://localhost:5173,http://localhost:4173"
+CORS_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("CORS_ORIGINS", _default_origins).split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:4173"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
