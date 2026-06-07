@@ -151,7 +151,8 @@ check_type ∈ {24h, 7d} (from `config.CHECK_TYPE_KEYS`).
 | GET | `/users/{id}/fingerprint` | — | `FingerprintResponse` |
 | POST | `/users/{id}/fingerprint/rebuild` | — | `FingerprintResponse` |
 | POST | `/materials/analyze` | `{title, raw_text}` | `{material_id, knowledge_map}` (cached on material) |
-| POST | `/materials/{id}/questions` | `?n=8&refresh=false` | `{material_id, title, cards:[{question,answer,concept,difficulty}], generated_by}` — **503** if no API key |
+| POST | `/materials/{id}/questions` | `?n=8&refresh=false&include_flagged=false` | `{material_id, title, cards:[{id,question,answer,concept,difficulty,flagged}], generated_by}` — flagged cards excluded by default; **503** if no API key |
+| POST | `/materials/{id}/questions/flag` | `{card_id}` (stable index) | `{material_id, card_id, flagged_count}` — marks a card bad/confusing (excluded from study + modelling); idempotent |
 | POST | `/users/{id}/study-plan` | `?material_id=&total_days=14` | `{user_id, total_days, days:[{day,technique,topic_focus,session_duration_minutes,time_of_day,rationale}], general_advice}` |
 | GET | `/export/study-data` | `?group=`, `X-API-Key` if set | CSV |
 | GET | `/health` | — | `{status, service}` |
@@ -170,23 +171,28 @@ Confidence tiers: <5 sessions = low/generic, 5–15 = medium, 16+ = high.
 
 ## 5. Build sequence (each piece committed + pushed before the next)
 
-### Step A — Card-answer logging (the one remaining backend piece) ⬅ DO FIRST
-The backend has no per-flashcard model. Decide how a flashcard round maps onto the
-existing model. **Recommended mapping (no heavy new tables):**
+### Step A — Card-answer logging
+**Backend part: ✅ DONE (commit adds the flag mechanism).** A flashcard now has a
+stable `id`, can be flagged via `POST /materials/{id}/questions/flag`, and flagged
+cards are excluded from the study set by default. The remaining part of Step A is the
+**frontend mapping** below (build it with Screen 3 in Step E):
+
+The backend has no per-flashcard *answer* model — and doesn't need one. Map a flashcard
+round onto the existing endpoints. **Recommended mapping (no heavy new tables):**
 - A flashcard round over a material = one **study event**. The frontend aggregates the
   round's correctness into a 0–1 score and:
   - First round on a material → `POST /sessions` with `quiz_score` = fraction correct,
     `technique` = the technique studied, plus duration/time-of-day.
   - Later rounds (24h / 7d later) → `POST /retention-checks` with that session's id and
     `check_type`. (This reuses the whole fingerprint pipeline as-is.)
-- **Bad-question flag:** add a tiny endpoint, e.g. `POST /materials/{id}/questions/flag`
-  with `{question_index}` (or a card id), storing flagged indices so flagged cards are
-  excluded from future rounds and from any per-card stats. Simplest store: a `flagged`
-  bool on each `Flashcard` in `questions_json`, or a small `flagged_questions` set column.
-- Keep it minimal; write a test like the others (`tests/test_questions.py` is the model).
+- **Bad-question flag: ✅ done.** `POST /materials/{id}/questions/flag {card_id}` stores
+  flagged ids in `questions_json` (`StoredQuestions.flagged`); the questions endpoint hides
+  them by default. The frontend should call this from the per-card flag affordance and
+  drop flagged cards from any round-score it computes.
 
-> ⚠️ This is the only step that touches the backend. Per the owner's rules, confirm the
-> mapping above with the owner before building if anything is ambiguous.
+> ⚠️ The remaining frontend mapping is the only thing left for Step A. Per the owner's
+> rules, confirm the round→session/retention mapping with the owner before wiring it if
+> anything is ambiguous (especially once the retention-schedule decision is locked).
 
 ### Step B — Frontend scaffold + `InsightProvider` real/sham split (§7)
 New app shell (mobile-first), routing, a typed API client (reuse `frontend/src/api.ts`

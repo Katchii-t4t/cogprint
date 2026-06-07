@@ -320,7 +320,8 @@ cd frontend && npx tsc --noEmit
 |---|---|---|---|
 | 2026-06-07 | Bot A (Karthik's PC) | Initial handover docs (README + HANDOVER) committed | ✅ done |
 | 2026-06-07 | Bot B (sgkar's PC) | Production-hardening pass (see below) | ✅ done |
-| 2026-06-07 | Bot B (sgkar's PC) | Consumer-app build STARTED: Agent 4 question-gen (LLM, isolated) done. Full plan + API contract handed off in **`CONSUMER_APP_BUILD.md`** — next session starts at Step A there. | ✅ handed off |
+| 2026-06-07 | Bot B (sgkar's PC) | Consumer-app build STARTED: Agent 4 question-gen (LLM, isolated) done. Full plan + API contract in **`CONSUMER_APP_BUILD.md`**. | ✅ handed off |
+| 2026-06-07 | Bot B (sgkar's PC) | Step A backend done: bad-question flag (`POST /materials/{id}/questions/flag`), stable card ids, flagged-card exclusion. 24 tests passing. Next: Screens 1–4 (frontend). | ✅ done |
 
 **Bot B pass — what landed (commits `0e0acd7`..`6501f8d`):**
 - **Env-configurable CORS** (`CORS_ORIGINS`) — unblocks the deployed frontend.

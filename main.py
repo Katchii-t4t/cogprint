@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from auth import require_api_key
 from config import RETENTION_SCHEDULE
-from schemas.question import QuestionSetResponse
+from schemas.question import FlagQuestionRequest, QuestionSetResponse
 from database import (
     CognitiveFingerprint,
     Material,
@@ -291,36 +291,54 @@ def analyze_material(body: MaterialCreate, db: Session = Depends(get_db)):
 # Flashcard / question generation (Agent 4 — the only LLM-backed endpoint)
 # ---------------------------------------------------------------------------
 
+def _cards_out(stored: "StoredQuestions", include_flagged: bool) -> list:
+    """Build response cards with stable ids + flag state, optionally hiding flagged."""
+    from schemas.question import FlashcardOut
+
+    flagged_set = set(stored.flagged)
+    out = []
+    for i, card in enumerate(stored.cards):
+        is_flagged = i in flagged_set
+        if is_flagged and not include_flagged:
+            continue  # flagged cards are excluded from the study set by default
+        out.append(FlashcardOut(id=i, flagged=is_flagged, **card.model_dump()))
+    return out
+
+
 @app.post("/materials/{material_id}/questions", response_model=QuestionSetResponse)
 def generate_questions(
     material_id: int,
     n: int = 8,
     refresh: bool = False,
+    include_flagged: bool = False,
     db: Session = Depends(get_db),
 ):
     """Generate (and cache) flashcards for a material via the LLM service.
 
     Cached on the material after first generation; pass ?refresh=true to force
-    regeneration. Returns 503 (not 500) when the LLM isn't configured, so the
-    UI can show a clean 'add an API key to enable flashcards' state.
+    regeneration. Flagged ("bad/confusing") cards are excluded by default; pass
+    ?include_flagged=true to see them. Returns 503 (not 500) when the LLM isn't
+    configured, so the UI can show a clean 'add an API key to enable flashcards'
+    state.
     """
     from agents.question_generator import (
         QuestionGenUnavailable,
         generate_flashcards,
     )
-    from schemas.question import GeneratedFlashcards
+    from schemas.question import StoredQuestions
 
     material = db.query(Material).filter_by(id=material_id).first()
     if not material:
         raise HTTPException(status_code=404, detail="Material not found")
 
-    # Serve cached cards unless a refresh is requested.
+    # Serve cached cards unless a refresh is requested. StoredQuestions tolerates
+    # the older {cards:[...]} cache shape (flagged defaults to []).
     if material.questions_json and not refresh:
-        cached = GeneratedFlashcards.model_validate_json(material.questions_json)
+        stored = StoredQuestions.model_validate_json(material.questions_json)
         return QuestionSetResponse(
             material_id=material.id,
             title=material.title,
-            cards=cached.cards,
+            cards=_cards_out(stored, include_flagged),
             generated_by="cache",
         )
 
@@ -329,16 +347,45 @@ def generate_questions(
     except QuestionGenUnavailable as e:
         raise HTTPException(status_code=503, detail=str(e))
 
-    material.questions_json = generated.model_dump_json()
+    stored = StoredQuestions(cards=generated.cards, flagged=[])
+    material.questions_json = stored.model_dump_json()
     db.commit()
 
     model_used = os.getenv("COGPRINT_QGEN_MODEL", "claude-opus-4-8")
     return QuestionSetResponse(
         material_id=material.id,
         title=material.title,
-        cards=generated.cards,
+        cards=_cards_out(stored, include_flagged),
         generated_by=f"llm:{model_used}",
     )
+
+
+@app.post("/materials/{material_id}/questions/flag", status_code=200)
+def flag_question(material_id: int, body: FlagQuestionRequest, db: Session = Depends(get_db)):
+    """Mark a flashcard as bad/confusing so it's excluded from study + modelling.
+
+    `card_id` is the stable index of the card in the material's question set.
+    Idempotent: flagging an already-flagged card is a no-op.
+    """
+    from schemas.question import StoredQuestions
+
+    material = db.query(Material).filter_by(id=material_id).first()
+    if not material:
+        raise HTTPException(status_code=404, detail="Material not found")
+    if not material.questions_json:
+        raise HTTPException(status_code=404, detail="No questions generated for this material yet")
+
+    stored = StoredQuestions.model_validate_json(material.questions_json)
+    if body.card_id >= len(stored.cards):
+        raise HTTPException(status_code=404, detail="card_id out of range")
+
+    if body.card_id not in stored.flagged:
+        stored.flagged.append(body.card_id)
+        material.questions_json = stored.model_dump_json()
+        db.commit()
+
+    return {"material_id": material_id, "card_id": body.card_id,
+            "flagged_count": len(stored.flagged)}
 
 
 # ---------------------------------------------------------------------------

@@ -15,7 +15,12 @@ from pydantic import BaseModel, Field
 
 
 class Flashcard(BaseModel):
-    """One question/answer pair generated from study material."""
+    """One question/answer pair generated from study material.
+
+    This is the LLM's structured-output target — keep it minimal so the model
+    only fills meaningful content. Bookkeeping (id, flagged) is added when the
+    card is served (see FlashcardOut) and stored (see StoredQuestions).
+    """
 
     question: str = Field(description="A clear recall question about one concept.")
     answer: str = Field(description="The correct, concise answer.")
@@ -27,9 +32,28 @@ class Flashcard(BaseModel):
 
 
 class GeneratedFlashcards(BaseModel):
-    """The structured-output target the LLM fills (no DB ids — see service module)."""
+    """The structured-output target the LLM fills (no ids/flags — added on serve)."""
 
     cards: List[Flashcard]
+
+
+class StoredQuestions(BaseModel):
+    """What gets cached on the material (questions_json).
+
+    `cards` order is fixed at generation time, so a card's index is its stable
+    id. `flagged` holds the ids of cards a learner marked bad/confusing; those
+    are excluded from study rounds and from modelling.
+    """
+
+    cards: List[Flashcard]
+    flagged: List[int] = Field(default_factory=list)
+
+
+class FlashcardOut(Flashcard):
+    """A flashcard as returned to the client: adds a stable id and flag state."""
+
+    id: int
+    flagged: bool = False
 
 
 class QuestionSetResponse(BaseModel):
@@ -37,5 +61,11 @@ class QuestionSetResponse(BaseModel):
 
     material_id: int
     title: str
-    cards: List[Flashcard]
+    cards: List[FlashcardOut]
     generated_by: str  # "llm:<model>" or "cache"
+
+
+class FlagQuestionRequest(BaseModel):
+    """Mark a card as bad/confusing so it's excluded from study + modelling."""
+
+    card_id: int = Field(ge=0, description="Stable id (index) of the card to flag.")
