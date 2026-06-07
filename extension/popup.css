@@ -1,0 +1,119 @@
+:root {
+  --indigo: #4f46e5;
+  --indigo-dk: #4338ca;
+  --indigo-50: #eef2ff;
+  --indigo-100: #e0e7ff;
+  --gray: #6b7280;
+  --line: #e5e7eb;
+}
+* { box-sizing: border-box; }
+body {
+  width: 320px;
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: #111827;
+  background: #fff;
+}
+.hd {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  background: linear-gradient(135deg, var(--indigo), var(--indigo-dk));
+  color: #fff;
+}
+.logo { font-size: 22px; }
+.title { font-weight: 700; line-height: 1; }
+.sub { font-size: 11px; opacity: 0.8; margin-top: 2px; }
+.gear {
+  margin-left: auto;
+  background: rgba(255, 255, 255, 0.15);
+  border: none;
+  color: #fff;
+  border-radius: 8px;
+  width: 30px;
+  height: 30px;
+  cursor: pointer;
+  font-size: 14px;
+}
+.gear:hover { background: rgba(255, 255, 255, 0.28); }
+
+.view { padding: 14px; }
+.hidden { display: none; }
+
+.lbl {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #374151;
+  margin: 12px 0 4px;
+}
+.lbl:first-child { margin-top: 0; }
+.lbl b { color: var(--indigo); }
+.muted { font-weight: 400; color: var(--gray); }
+
+.inp,
+.range,
+select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+  outline: none;
+}
+.inp:focus,
+select:focus { border-color: var(--indigo); box-shadow: 0 0 0 2px var(--indigo-100); }
+.range { padding: 0; accent-color: var(--indigo); }
+
+.row { display: flex; gap: 10px; }
+.col { flex: 1; }
+
+.seg { display: flex; gap: 6px; }
+.seg button {
+  flex: 1;
+  padding: 7px 0;
+  font-size: 16px;
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.seg button.active {
+  border-color: var(--indigo);
+  background: var(--indigo-50);
+}
+
+.opt { margin-top: 12px; }
+.opt summary {
+  font-size: 12px;
+  color: var(--gray);
+  cursor: pointer;
+  user-select: none;
+}
+
+.btn {
+  width: 100%;
+  margin-top: 16px;
+  padding: 11px;
+  background: var(--indigo);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn:hover { background: var(--indigo-dk); }
+.btn:disabled { opacity: 0.5; cursor: default; }
+
+.msg { font-size: 12px; margin: 10px 0 0; min-height: 16px; }
+.msg.ok { color: #059669; }
+.msg.err { color: #dc2626; }
+
+.footer {
+  margin-top: 12px;
+  text-align: center;
+  font-size: 11px;
+  color: #9ca3af;
+}

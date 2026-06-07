@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="hd">
+      <span class="logo">🧠</span>
+      <div>
+        <div class="title">CogPrint</div>
+        <div class="sub">Quick session log</div>
+      </div>
+      <button id="gear" class="gear" title="Settings">⚙️</button>
+    </header>
+
+    <!-- SETTINGS / FIRST-RUN -->
+    <section id="settings" class="view hidden">
+      <label class="lbl">Participant ID</label>
+      <input id="participantId" class="inp" type="number" min="1" placeholder="e.g. 42" />
+
+      <label class="lbl">Backend URL</label>
+      <input id="baseUrl" class="inp" type="text" placeholder="http://localhost:8000" />
+
+      <label class="lbl">API key <span class="muted">(only if the backend requires one)</span></label>
+      <input id="apiKey" class="inp" type="text" placeholder="optional" />
+
+      <button id="saveSettings" class="btn">Save</button>
+      <p id="settingsMsg" class="msg"></p>
+    </section>
+
+    <!-- LOG FORM -->
+    <section id="logView" class="view hidden">
+      <label class="lbl">Technique</label>
+      <select id="technique" class="inp">
+        <option value="active_recall">Active recall</option>
+        <option value="spaced_repetition">Spaced repetition</option>
+        <option value="practice_testing">Practice testing</option>
+        <option value="elaborative_interrogation">Elaborative interrogation</option>
+        <option value="interleaving">Interleaving</option>
+        <option value="mind_maps">Mind maps</option>
+        <option value="re_reading">Re-reading</option>
+      </select>
+
+      <div class="row">
+        <div class="col">
+          <label class="lbl">Duration <b id="durVal">30</b> min</label>
+          <input id="duration" class="range" type="range" min="5" max="180" step="5" value="30" />
+        </div>
+      </div>
+
+      <label class="lbl">Time of day</label>
+      <div id="tod" class="seg">
+        <button data-v="morning" type="button">🌅</button>
+        <button data-v="afternoon" type="button">☀️</button>
+        <button data-v="evening" type="button">🌆</button>
+        <button data-v="night" type="button">🌙</button>
+      </div>
+
+      <label class="lbl">Quiz score <b id="quizVal">70</b>%</label>
+      <input id="quiz" class="range" type="range" min="0" max="100" step="5" value="70" />
+
+      <details class="opt">
+        <summary>Optional — sleep & stress</summary>
+        <div class="row">
+          <div class="col">
+            <label class="lbl">Sleep (h)</label>
+            <input id="sleep" class="inp" type="number" min="0" max="24" step="0.5" placeholder="7.5" />
+          </div>
+          <div class="col">
+            <label class="lbl">Stress (1–5)</label>
+            <input id="stress" class="inp" type="number" min="1" max="5" step="1" placeholder="3" />
+          </div>
+        </div>
+      </details>
+
+      <button id="submit" class="btn">Log session</button>
+      <p id="logMsg" class="msg"></p>
+      <div class="footer">ID #<span id="pidLabel">—</span></div>
+    </section>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
