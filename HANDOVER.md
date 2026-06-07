@@ -380,6 +380,159 @@ nudges — not started; confirm scope first.
 
 ---
 
+# Appendix A — Complete State Snapshot (detailed, plain-language)
+
+> A full backup of context as of commit `4cf43e1` (17 commits). If you are picking
+> this up cold — or recovering after losing a session — this section alone should let
+> you rebuild the whole mental model. Everything here is also true in the code; when
+> the two disagree, the code wins and you should fix this doc.
+
+## A.1 What CogPrint is, in one breath
+
+A youth-led research project (owner: Katchi / Karthik) testing whether *individuals
+respond differently and predictably to study techniques* — and, if so, building an app
+that personalises study advice. **Two tracks:** the **research track** (a real RCT/study
+that produces findings) runs first; the **product track** (the consumer app) is built in
+parallel but must never hard-code a finding the study hasn't confirmed yet. This repo is
+the **backend + research-platform frontend + (now) the start of the consumer app**. The
+public marketing site is a *separate* repo (`cogprint-site`).
+
+## A.2 Backup & where everything lives
+
+- **GitHub (the backup):** `github.com/Katchii-t4t/cogprint`, default branch **`master`**.
+  Everything important is committed and pushed. `git pull origin master` gives you 100%.
+- **Local clone (this machine, user `sgkar`):**
+  `C:\Users\sgkar\.claude\sessions\Proj Ciel\cogprint`.
+- **Local-only, NOT on GitHub (all regenerable — safe to lose):** `cogprint.db` (SQLite
+  data), `__pycache__/`, `.pytest_cache/`, `frontend/node_modules/`, `frontend/dist/`,
+  and `.env` (does not exist yet — see A.7). `.gitignore` keeps these out on purpose.
+- **Node.js:** not system-installed here; a **portable** copy lives at
+  `%LOCALAPPDATA%\node-portable\node-v24.16.0-win-x64`. Put it on PATH to run `npm`.
+- **Python:** Anaconda (`python`, `uvicorn`, `pytest`, `numpy`, `Pillow`, `anthropic`
+  all available). The other machine (user `Karthik`) is the second collaborator.
+
+## A.3 File inventory — what each thing is
+
+**Backend (Python / FastAPI):**
+- `main.py` — every REST route. Reads `CORS_ORIGINS`, mounts optional API-key auth,
+  runs fingerprint rebuilds as BackgroundTasks. Hot file — coordinate edits.
+- `database.py` — SQLAlchemy models: `User` (group control/treatment), `StudySession`,
+  `RetentionCheck`, `Material` (now incl. `questions_json`), `CognitiveFingerprint`.
+- `config.py` — single source of truth for the **retention schedule** (24h/7d). Honest
+  about the limit: the t=1/t=7 day-coords are also baked into the math in 5 files.
+- `auth.py` — optional API-key dependency (`COGPRINT_API_KEY`); no-op unless set.
+- `schemas/` — Pydantic: `fingerprint.py`, `session.py`, and `question.py` (flashcards).
+- `personalization/` — the API-free ML core: `fingerprint_builder.py` (10-step pipeline +
+  RCT blinding), `linucb.py` (bandit), `hierarchical_memory.py` (Bayesian MCMC),
+  `forgetting_curve.py` (Ebbinghaus OLS — audited, correct), `serializer.py` (legacy).
+- `agents/` — `material_analyzer.py` (TF-IDF→LSA→TextRank, API-free),
+  `study_planner.py` (DP spaced-repetition, API-free),
+  `question_generator.py` (**Agent 4 — the ONLY LLM call**, isolated, optional),
+  `performance_optimizer.py` (deprecated legacy; never instantiate).
+- `tests/` — 24 pytest tests (conftest + test_api + test_auth + test_pipeline +
+  test_questions). Run `python -m pytest`.
+
+**Research-platform frontend (`frontend/`):** React 18 + Vite + Tailwind + react-router.
+7 pages (Onboarding, Dashboard, LogSession, RetentionCheck, Fingerprint, StudyPlan,
+Researcher). `src/types.ts` mirrors backend schemas — reuse it. Builds clean; is an
+**installable PWA**; light/indigo theme.
+
+**Browser extension (`extension/`):** MV3, vanilla JS, one-click session logging. Load
+unpacked from `chrome://extensions`.
+
+**Docs:** `README.md`, `HANDOVER.md` (this file), `CONSUMER_APP_BUILD.md` (the consumer
+app plan + API contract), `RETENTION_SCHEDULE_DECISION.md` (the open scientific choice).
+
+## A.4 Everything done so far (the 17 commits, grouped)
+
+1. **Docs bootstrap** — README + HANDOVER so two machines can collaborate.
+2. **Backend hardening (Bot B pass 1):** env-configurable CORS; fingerprint rebuild moved
+   to BackgroundTasks; optional API-key auth on bulk-data endpoints; `config.py` retention
+   source-of-truth + dead-code removal; audited `forgetting_curve.py`/`serializer.py`;
+   added missing `numpy` to requirements; first pytest suite (was zero).
+3. **Frontend made real (Bot B pass 2):** fixed 2 build-breakers (duplicate `corr`,
+   missing `vite-env.d.ts`); `VITE_API_BASE` config; verified the full participant flow
+   end-to-end through the Vite proxy against a live backend; added PWA (manifest + service
+   worker + generated icons); installed Node portably.
+4. **Browser extension** — MV3 quick-log popup.
+5. **Consumer app foundation:** **Agent 4** (LLM flashcard generation, isolated, graceful
+   503 without a key) + `CONSUMER_APP_BUILD.md` (vision, 4-screen plan, API contract,
+   real/sham architecture) + **Step A backend** (bad-question flag, stable card ids,
+   flagged-card exclusion).
+
+## A.5 How the system works (data flow)
+
+```
+Participant pastes material ─▶ POST /materials/analyze ─▶ knowledge map (cached)
+(optional, app)               POST /materials/{id}/questions ─▶ flashcards (Agent 4, LLM, cached)
+Participant studies + tests ─▶ POST /sessions (quiz_score) ─▶ BackgroundTask rebuilds fingerprint
+24h / 7d later ─────────────▶ POST /retention-checks ───────▶ BackgroundTask rebuilds fingerprint
+                                                                     │
+                              GET /users/{id}/fingerprint ◀──────────┘  (technique effectiveness,
+                                                                          optimal conditions, MCMC
+                                                                          stability, bandit, insights)
+```
+Control-group users get a **generic** fingerprint (RCT blinding); treatment users get the
+full personalised pipeline. Confidence: <5 sessions = low, 5–15 = medium, 16+ = high.
+
+## A.6 What works right now vs what's not built
+
+**Works (verified):** the whole backend (24 tests green), the research frontend (builds +
+runs + PWA), the extension, Agent 4 generation + the flag mechanism (mocked in tests; live
+needs a key). **Not built:** the consumer app's 4 screens, the `InsightProvider` real/sham
+frontend split, the dark redesign, the flashcard-round → session/retention frontend wiring
+(Step A's frontend half). All of that is reduced to *frontend* work against a now-complete,
+stable API contract (see `CONSUMER_APP_BUILD.md` §4).
+
+## A.7 Security model (read before touching the LLM)
+
+- The Anthropic API key is **never** in code, args, logs, commits, or chat. The owner
+  puts `ANTHROPIC_API_KEY=sk-ant-...` in a local `.env` themselves. `.env` is gitignored.
+- Without a key, `POST /materials/{id}/questions` returns **503** and everything else (all
+  API-free) works normally — the UI should show a clean "needs setup" state, not crash.
+- `COGPRINT_QGEN_MODEL` (default `claude-opus-4-8`) is the cost lever — switch to a cheaper
+  model to save money. Question sets are cached per material; don't regenerate needlessly.
+- `COGPRINT_API_KEY` (separate thing) gates the bulk-data researcher endpoints. Off by
+  default (fine for local/closed pilot); set it before any public deploy.
+
+## A.8 Open decisions (do NOT resolve unilaterally)
+
+- **Retention schedule:** code uses 24h/7d; study materials use day 1/5/10/30. This is a
+  *scientific* choice for the owner + UiO advisor (meeting ~19 Jun). See
+  `RETENTION_SCHEDULE_DECISION.md`. The flashcard mapping must use whatever
+  `config.CHECK_TYPE_KEYS` holds.
+- **Consumer app: new `app/` folder vs restyle `frontend/`** — `CONSUMER_APP_BUILD.md` §6;
+  recommended new folder so the research platform keeps working.
+
+## A.9 Recover / run everything from scratch
+
+```bash
+# 1. Get the code (the backup IS GitHub)
+git clone https://github.com/Katchii-t4t/cogprint.git && cd cogprint
+
+# 2. Backend
+pip install -r requirements.txt
+python -m pytest                 # expect 24 passing
+uvicorn main:app --reload        # http://localhost:8000/docs
+
+# 3. Frontend (Node on PATH — portable copy at %LOCALAPPDATA%\node-portable\...)
+cd frontend && npm install && npm run dev   # http://localhost:5173
+
+# 4. (optional) enable flashcards: create cogprint/.env with ANTHROPIC_API_KEY=...
+```
+Sanity before pushing: `python -m py_compile main.py config.py auth.py database.py
+schemas/*.py personalization/*.py agents/*.py` and `cd frontend && npx tsc --noEmit`.
+
+## A.10 What's next
+
+Frontend build of the consumer app, in order: **Step A frontend wiring** → **Screen 1**
+(paste→analyze) → **Screen 2** (study plan + why + timer) → **Screen 3** (flashcard swipe
+loop, using Agent 4 + the flag endpoint) → **Screen 4** (growing fingerprint) → **dark
+redesign**. Build each end-to-end before the next. Confirm scope with the owner before
+anything beyond these screens. Full detail: `CONSUMER_APP_BUILD.md`.
+
+---
+
 *End of handover. Everything above reflects the actual state of the repo as of the last
 commit. When in doubt, read the code — the docstrings are detailed and the math is explained
 inline.*
