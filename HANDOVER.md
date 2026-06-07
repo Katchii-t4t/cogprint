@@ -320,6 +320,7 @@ cd frontend && npx tsc --noEmit
 |---|---|---|---|
 | 2026-06-07 | Bot A (Karthik's PC) | Initial handover docs (README + HANDOVER) committed | ✅ done |
 | 2026-06-07 | Bot B (sgkar's PC) | Production-hardening pass (see below) | ✅ done |
+| 2026-06-07 | Bot B (sgkar's PC) | Consumer-app build: Agent 4 question-gen (LLM, isolated) — Screen 3 backend | 🔧 in progress |
 
 **Bot B pass — what landed (commits `0e0acd7`..`6501f8d`):**
 - **Env-configurable CORS** (`CORS_ORIGINS`) — unblocks the deployed frontend.

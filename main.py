@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from auth import require_api_key
 from config import RETENTION_SCHEDULE
+from schemas.question import QuestionSetResponse
 from database import (
     CognitiveFingerprint,
     Material,
@@ -284,6 +285,60 @@ def analyze_material(body: MaterialCreate, db: Session = Depends(get_db)):
     db.commit()
 
     return MaterialAnalysisResponse(material_id=material.id, knowledge_map=knowledge_map)
+
+
+# ---------------------------------------------------------------------------
+# Flashcard / question generation (Agent 4 — the only LLM-backed endpoint)
+# ---------------------------------------------------------------------------
+
+@app.post("/materials/{material_id}/questions", response_model=QuestionSetResponse)
+def generate_questions(
+    material_id: int,
+    n: int = 8,
+    refresh: bool = False,
+    db: Session = Depends(get_db),
+):
+    """Generate (and cache) flashcards for a material via the LLM service.
+
+    Cached on the material after first generation; pass ?refresh=true to force
+    regeneration. Returns 503 (not 500) when the LLM isn't configured, so the
+    UI can show a clean 'add an API key to enable flashcards' state.
+    """
+    from agents.question_generator import (
+        QuestionGenUnavailable,
+        generate_flashcards,
+    )
+    from schemas.question import GeneratedFlashcards
+
+    material = db.query(Material).filter_by(id=material_id).first()
+    if not material:
+        raise HTTPException(status_code=404, detail="Material not found")
+
+    # Serve cached cards unless a refresh is requested.
+    if material.questions_json and not refresh:
+        cached = GeneratedFlashcards.model_validate_json(material.questions_json)
+        return QuestionSetResponse(
+            material_id=material.id,
+            title=material.title,
+            cards=cached.cards,
+            generated_by="cache",
+        )
+
+    try:
+        generated = generate_flashcards(material.title, material.raw_text, n=n)
+    except QuestionGenUnavailable as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+    material.questions_json = generated.model_dump_json()
+    db.commit()
+
+    model_used = os.getenv("COGPRINT_QGEN_MODEL", "claude-opus-4-8")
+    return QuestionSetResponse(
+        material_id=material.id,
+        title=material.title,
+        cards=generated.cards,
+        generated_by=f"llm:{model_used}",
+    )
 
 
 # ---------------------------------------------------------------------------

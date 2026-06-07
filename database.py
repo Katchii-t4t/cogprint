@@ -63,6 +63,7 @@ class Material(Base):
     title = Column(String(255), nullable=False)
     raw_text = Column(Text, nullable=False)
     knowledge_map_json = Column(Text, nullable=True)
+    questions_json = Column(Text, nullable=True)  # cached LLM-generated flashcards
 
     sessions = relationship("StudySession", back_populates="material")
 
