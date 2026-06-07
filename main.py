@@ -14,6 +14,7 @@ from database import (
     CognitiveFingerprint,
     Material,
     RetentionCheck,
+    SessionLocal,
     StudyGroup,
     StudySession,
     User,
@@ -62,6 +63,24 @@ app.add_middleware(
 @app.on_event("startup")
 def startup():
     init_db()
+
+
+def _rebuild_fingerprint_bg(user_id: int) -> None:
+    """Rebuild a user's fingerprint in a background task.
+
+    Runs *after* the HTTP response is sent, so logging a session/retention
+    check returns immediately instead of blocking on the full MCMC pipeline.
+    The request-scoped DB session is already closed by the time this fires,
+    so we open our own and always close it. Failures are swallowed: a failed
+    rebuild must never surface as a failed data-logging request.
+    """
+    db = SessionLocal()
+    try:
+        rebuild_fingerprint(db, user_id)
+    except Exception:
+        pass
+    finally:
+        db.close()
 
 
 # ---------------------------------------------------------------------------
@@ -119,7 +138,11 @@ def update_post_test(user_id: int, body: PostTestUpdate, db: Session = Depends(g
 # ---------------------------------------------------------------------------
 
 @app.post("/sessions", response_model=SessionResponse, status_code=201)
-def log_session(body: SessionCreate, db: Session = Depends(get_db)):
+def log_session(
+    body: SessionCreate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
     user = db.query(User).filter_by(id=body.user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -138,12 +161,9 @@ def log_session(body: SessionCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(session)
 
-    # Trigger fingerprint rebuild in the background after each new session
-    # (runs synchronously here — swap for a task queue in production)
-    try:
-        rebuild_fingerprint(db, body.user_id)
-    except Exception:
-        pass  # Never fail the session log because of the fingerprint rebuild
+    # Rebuild the fingerprint after the response is sent so the participant's
+    # "log session" request stays fast even as the MCMC pipeline grows.
+    background_tasks.add_task(_rebuild_fingerprint_bg, body.user_id)
 
     return session
 
@@ -153,7 +173,11 @@ def log_session(body: SessionCreate, db: Session = Depends(get_db)):
 # ---------------------------------------------------------------------------
 
 @app.post("/retention-checks", response_model=RetentionCheckResponse, status_code=201)
-def log_retention_check(body: RetentionCheckCreate, db: Session = Depends(get_db)):
+def log_retention_check(
+    body: RetentionCheckCreate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
     session = db.query(StudySession).filter_by(id=body.session_id).first()
     if not session or session.user_id != body.user_id:
         raise HTTPException(status_code=404, detail="Session not found for this user")
@@ -179,11 +203,8 @@ def log_retention_check(body: RetentionCheckCreate, db: Session = Depends(get_db
     db.commit()
     db.refresh(check)
 
-    # Rebuild fingerprint now that we have new retention data
-    try:
-        rebuild_fingerprint(db, body.user_id)
-    except Exception:
-        pass
+    # Rebuild fingerprint in the background now that we have new retention data.
+    background_tasks.add_task(_rebuild_fingerprint_bg, body.user_id)
 
     return check
 
