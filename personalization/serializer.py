@@ -27,11 +27,15 @@ def _fmt(val: Optional[float], precision: int = 2) -> str:
 def serialize_for_agent2(
     sessions: list[StudySession],
     retention_checks: list[RetentionCheck],
-) -> str:
+) -> tuple[str, dict]:
     """
     Converts raw DB records into a structured text block injected into Agent 2's prompt.
     Pre-computes all statistics (Pearson r, per-technique averages, trajectory) so that
     the LLM only needs to synthesize patterns, not do arithmetic.
+
+    Returns ``(prompt_text, memory_profiles)``: the rendered prompt block plus the
+    raw Ebbinghaus profiles dict. (Legacy narrative-mode helper — not used by the
+    live API-free pipeline; kept for a future optional narrative mode.)
     """
     n = len(sessions)
     if n == 0:
