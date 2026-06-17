@@ -2,8 +2,22 @@
 
 **Audience:** the next Claude Code session (or engineer) building the
 consumer-facing CogPrint app on top of the existing backend.
-**Status:** foundation laid (Agent 4 question-generation done). Screens not built yet.
-**Read order:** this file → `HANDOVER.md` (full backend state) → the code.
+**Status:** ✅ **MVP built** — all 4 screens + retention checks live in `app/`,
+verified end-to-end against the backend (Bot A, 2026-06-18). Remaining: real LLM
+flashcards need `ANTHROPIC_API_KEY`; deploy; explicit sham-content polish. The
+dark redesign is already done. See the build-status box below and `app/README.md`.
+**Read order:** this file → `app/README.md` → `HANDOVER.md` (backend) → the code.
+
+> ### Build status (2026-06-18)
+> - ✅ **Screen 1 Paste** (`app/src/pages/Paste.tsx`) — analyse + anonymous user.
+> - ✅ **Screen 2 Plan** (`Plan.tsx`) — 14-day plan, rationale, Pomodoro timer.
+> - ✅ **Screen 3 Cards** (`Cards.tsx`) — swipe loop, flag, logs session on finish.
+> - ✅ **Screen 4 Grow** (`Grow.tsx`) — growing fingerprint + bars/grid/insights.
+> - ✅ **Checks** (`Checks.tsx`) — 24h/7d retention flow for returning users.
+> - ✅ **Real/sham `InsightProvider`** (`insights.ts`), **dark theme**, **PWA**.
+> - ⏳ Real flashcards need the API key set; ⏳ deploy; ⏳ richer sham content.
+> - ⚠️ Built as a **new `app/` folder** (the recommended option in §6), NOT a
+>   restyle of `frontend/` — the research platform is untouched.
 
 > This is the *product track* (the AI study app). It sits on top of the existing
 > *research track* backend. Do **not** rebuild the backend. Build the app on the

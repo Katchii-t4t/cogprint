@@ -32,6 +32,10 @@ export default function Paste() {
 
       const title = trimmed.slice(0, 60) + (trimmed.length > 60 ? "…" : "");
       const result = await api.analyzeMaterial(title, trimmed);
+      setState({
+        lastMaterialId: result.material_id,
+        lastMaterialTitle: result.knowledge_map.title,
+      });
       setConceptCount(result.knowledge_map.total_concepts);
       setPhase("done");
 

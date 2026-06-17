@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api";
-import { currentUserId, currentHour } from "../store";
+import { currentUserId, currentHour, lastMaterialId as storedMaterialId } from "../store";
 import type { Flashcard } from "../types";
 
 type CardState = "front" | "back";
@@ -15,7 +15,7 @@ interface CardResult {
 
 export default function Cards() {
   const [params] = useSearchParams();
-  const materialId = params.get("m") ? Number(params.get("m")) : null;
+  const materialId = params.get("m") ? Number(params.get("m")) : storedMaterialId();
   const navigate = useNavigate();
 
   const [cards, setCards] = useState<Flashcard[]>([]);
@@ -24,6 +24,7 @@ export default function Cards() {
   const [results, setResults] = useState<CardResult[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [needsSetup, setNeedsSetup] = useState(false);
   const [swipeX, setSwipeX] = useState(0);
   const [logging, setLogging] = useState(false);
 
@@ -39,7 +40,7 @@ export default function Cards() {
       .then((r) => setCards(r.cards.filter((c) => !c.flagged)))
       .catch((e) => {
         if (e.message.startsWith("503")) {
-          setError("Flashcard generation needs an API key to be configured. Ask your study admin.");
+          setNeedsSetup(true);
         } else {
           setError(e.message);
         }
@@ -126,6 +127,7 @@ export default function Cards() {
   }
 
   if (loading) return <LoadingState />;
+  if (needsSetup) return <NeedsSetupState materialId={materialId} navigate={navigate} />;
   if (error) return <ErrorState msg={error} onBack={() => navigate("/")} />;
   if (logging) return <LoggingState />;
   if (cards.length === 0) {
@@ -284,6 +286,51 @@ function ErrorState({ msg, onBack }: { msg: string; onBack: () => void }) {
     <div className="flex-1 flex flex-col items-center justify-center min-h-dvh gap-4 bg-ink-900 px-6">
       <p className="text-red-400 text-sm text-center">{msg}</p>
       <button onClick={onBack} className="text-neural text-sm">← Go back</button>
+    </div>
+  );
+}
+
+function NeedsSetupState({
+  materialId,
+  navigate,
+}: {
+  materialId: number | null;
+  navigate: (to: string) => void;
+}) {
+  return (
+    <div className="flex flex-col min-h-dvh bg-ink-900 max-w-lg mx-auto w-full px-6 py-8">
+      <button onClick={() => navigate("/")} className="text-slate-500 text-sm hover:text-slate-300 mb-8">
+        ← Home
+      </button>
+      <div className="flex-1 flex flex-col items-center justify-center gap-6 text-center">
+        <div className="text-5xl">🔑</div>
+        <div>
+          <h2 className="text-white font-bold text-xl">Flashcards need setup</h2>
+          <p className="text-slate-400 text-sm mt-2 leading-relaxed">
+            Flashcard generation is powered by an AI model that isn't configured
+            on this server yet. The rest of CogPrint — your study plan and your
+            growing fingerprint — works right now.
+          </p>
+        </div>
+        <div className="w-full flex flex-col gap-3 mt-2">
+          <button
+            onClick={() => navigate(materialId ? `/plan?m=${materialId}` : "/plan")}
+            className="w-full py-4 rounded-2xl bg-neural text-ink-900 font-bold hover:bg-neural-glow active:scale-[0.98] transition-all"
+          >
+            See your study plan →
+          </button>
+          <button
+            onClick={() => navigate("/grow")}
+            className="w-full py-3 rounded-xl bg-ink-700 neural-border text-slate-300 text-sm font-medium hover:bg-ink-600 transition-all"
+          >
+            See your fingerprint
+          </button>
+        </div>
+        <p className="text-slate-600 text-xs mt-4">
+          Admin: set <code className="text-slate-500">ANTHROPIC_API_KEY</code> in the
+          backend <code className="text-slate-500">.env</code> to enable flashcards.
+        </p>
+      </div>
     </div>
   );
 }

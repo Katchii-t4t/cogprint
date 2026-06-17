@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api";
-import { currentUserId } from "../store";
+import { currentUserId, lastMaterialId as storedMaterialId } from "../store";
 import type { StudyPlanResponse, StudyPlanDay, PendingCheckItem } from "../types";
 import { label } from "../insights";
+import Timer from "../components/Timer";
 
 const TECHNIQUE_ICONS: Record<string, string> = {
   spaced_repetition: "🔁",
@@ -24,7 +25,7 @@ const TIME_ICONS: Record<string, string> = {
 
 export default function Plan() {
   const [params] = useSearchParams();
-  const materialId = params.get("m") ? Number(params.get("m")) : undefined;
+  const materialId = params.get("m") ? Number(params.get("m")) : storedMaterialId();
   const navigate = useNavigate();
 
   const [plan, setPlan] = useState<StudyPlanResponse | null>(null);
@@ -36,6 +37,11 @@ export default function Plan() {
   useEffect(() => {
     const userId = currentUserId();
     if (!userId) { navigate("/"); return; }
+    if (!materialId) {
+      // No material to plan around — send the user back to paste one.
+      navigate("/");
+      return;
+    }
 
     Promise.all([
       api.getStudyPlan(userId, materialId),
@@ -65,6 +71,9 @@ export default function Plan() {
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 pb-32">
+        {/* Focus timer — defaults to today's recommended session length */}
+        <Timer focusMinutes={plan.days[0]?.session_duration_minutes ?? 25} />
+
         {/* Pending checks banner */}
         {pending.length > 0 && (
           <div

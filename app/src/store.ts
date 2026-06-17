@@ -2,17 +2,31 @@ import type { StudyGroup } from "./types";
 
 const KEY = "cogprint_app_v1";
 
+export type TimeOfDay = "morning" | "afternoon" | "evening" | "night";
+
 export interface AppState {
   userId: number | null;
   group: StudyGroup | null;
+  /** Most recently analysed material — lets /plan and /grow recover it when
+      it isn't in the URL (e.g. the user navigates back to the plan). */
+  lastMaterialId: number | null;
+  /** Title of the last material, for friendlier headings. */
+  lastMaterialTitle: string | null;
 }
+
+const EMPTY: AppState = {
+  userId: null,
+  group: null,
+  lastMaterialId: null,
+  lastMaterialTitle: null,
+};
 
 export function getState(): AppState {
   try {
     const raw = localStorage.getItem(KEY);
-    return raw ? JSON.parse(raw) : { userId: null, group: null };
+    return raw ? { ...EMPTY, ...JSON.parse(raw) } : { ...EMPTY };
   } catch {
-    return { userId: null, group: null };
+    return { ...EMPTY };
   }
 }
 
@@ -29,6 +43,10 @@ export function currentUserId(): number | null {
   return getState().userId;
 }
 
+export function lastMaterialId(): number | null {
+  return getState().lastMaterialId;
+}
+
 export function currentHour(): TimeOfDay {
   const h = new Date().getHours();
   if (h < 12) return "morning";
@@ -36,5 +54,3 @@ export function currentHour(): TimeOfDay {
   if (h < 21) return "evening";
   return "night";
 }
-
-type TimeOfDay = "morning" | "afternoon" | "evening" | "night";

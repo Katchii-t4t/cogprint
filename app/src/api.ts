@@ -36,8 +36,11 @@ export const api = {
       body: JSON.stringify({ title, raw_text }),
     }),
 
+  // POST — generates (and caches) the question set on the backend.
   getQuestions: (materialId: number, n = 8) =>
-    req<QuestionsResponse>(`/materials/${materialId}/questions?n=${n}`),
+    req<QuestionsResponse>(`/materials/${materialId}/questions?n=${n}`, {
+      method: "POST",
+    }),
 
   flagQuestion: (materialId: number, cardId: number) =>
     req<{ material_id: number; card_id: number; flagged_count: number }>(
@@ -45,10 +48,15 @@ export const api = {
       { method: "POST", body: JSON.stringify({ card_id: cardId }) }
     ),
 
-  getStudyPlan: (userId: number, materialId?: number, totalDays = 14) => {
-    const params = new URLSearchParams({ total_days: String(totalDays) });
-    if (materialId) params.set("material_id", String(materialId));
-    return req<StudyPlanResponse>(`/users/${userId}/study-plan?${params}`);
+  // POST — material_id is required by the backend (POST /users/{id}/study-plan).
+  getStudyPlan: (userId: number, materialId: number, totalDays = 14) => {
+    const params = new URLSearchParams({
+      material_id: String(materialId),
+      total_days: String(totalDays),
+    });
+    return req<StudyPlanResponse>(`/users/${userId}/study-plan?${params}`, {
+      method: "POST",
+    });
   },
 
   logSession: (payload: {
