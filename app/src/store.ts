@@ -4,6 +4,12 @@ const KEY = "cogprint_app_v1";
 
 export type TimeOfDay = "morning" | "afternoon" | "evening" | "night";
 
+export interface RecentMaterial {
+  id: number;
+  title: string;
+  ts: number;
+}
+
 export interface AppState {
   userId: number | null;
   group: StudyGroup | null;
@@ -12,6 +18,11 @@ export interface AppState {
   lastMaterialId: number | null;
   /** Title of the last material, for friendlier headings. */
   lastMaterialTitle: string | null;
+  /** Recently analysed materials (newest first) — cached on the backend, so
+      re-opening one is instant: no re-analysis, no re-generation. */
+  recents: RecentMaterial[];
+  /** When the forgetting-nudge was last dismissed (rate-limits it to ~6h). */
+  nudgeDismissedAt: number | null;
 }
 
 const EMPTY: AppState = {
@@ -19,6 +30,8 @@ const EMPTY: AppState = {
   group: null,
   lastMaterialId: null,
   lastMaterialTitle: null,
+  recents: [],
+  nudgeDismissedAt: null,
 };
 
 export function getState(): AppState {
@@ -45,6 +58,21 @@ export function currentUserId(): number | null {
 
 export function lastMaterialId(): number | null {
   return getState().lastMaterialId;
+}
+
+export function addRecent(id: number, title: string) {
+  const prev = getState().recents.filter((r) => r.id !== id);
+  setState({ recents: [{ id, title, ts: Date.now() }, ...prev].slice(0, 6) });
+}
+
+/** Gentle nudges only: show at most once per ~6 hours after a dismissal. */
+export function nudgeAllowed(): boolean {
+  const at = getState().nudgeDismissedAt;
+  return !at || Date.now() - at > 6 * 60 * 60 * 1000;
+}
+
+export function dismissNudge() {
+  setState({ nudgeDismissedAt: Date.now() });
 }
 
 export function currentHour(): TimeOfDay {

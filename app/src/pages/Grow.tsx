@@ -45,7 +45,7 @@ export default function Grow() {
       api.getPendingChecks(userId),
     ])
       .then(([fingerprint, checks]) => {
-        setView(buildView(fingerprint.fingerprint, group ?? "treatment"));
+        setView(buildView(fingerprint.fingerprint, group ?? "treatment", userId));
         setPending(checks.length);
       })
       .catch(() => {})

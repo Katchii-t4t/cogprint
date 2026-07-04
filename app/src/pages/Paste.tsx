@@ -1,7 +1,10 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
-import { getState, setState } from "../store";
+import {
+  addRecent, dismissNudge, getState, nudgeAllowed, setState,
+  type RecentMaterial,
+} from "../store";
 
 type Phase = "idle" | "reading" | "done";
 
@@ -10,8 +13,19 @@ export default function Paste() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [conceptCount, setConceptCount] = useState(0);
   const [error, setError] = useState("");
+  const [recents] = useState<RecentMaterial[]>(() => getState().recents);
+  const [pendingChecks, setPendingChecks] = useState(0);
   const navigate = useNavigate();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Predicted-forgetting nudge — gentle, dismissible, rate-limited (~6h).
+  useEffect(() => {
+    const { userId } = getState();
+    if (!userId || !nudgeAllowed()) return;
+    api.getPendingChecks(userId)
+      .then((checks) => setPendingChecks(checks.length))
+      .catch(() => {});
+  }, []);
 
   async function handleSubmit() {
     const trimmed = text.trim();
@@ -36,6 +50,12 @@ export default function Paste() {
         lastMaterialId: result.material_id,
         lastMaterialTitle: result.knowledge_map.title,
       });
+      addRecent(result.material_id, result.knowledge_map.title);
+
+      // Pre-generate the flashcards NOW (fire-and-forget) so the Cards screen
+      // is instant when the user gets there — never a loading wall mid-loop.
+      api.getQuestions(result.material_id).catch(() => {});
+
       setConceptCount(result.knowledge_map.total_concepts);
       setPhase("done");
 
@@ -59,6 +79,31 @@ export default function Paste() {
 
       {phase === "idle" && (
         <div className="animate-fade-up flex flex-col flex-1 gap-6">
+          {/* Predicted-forgetting nudge — gentle, dismissible */}
+          {pendingChecks > 0 && (
+            <div className="rounded-2xl bg-ink-700 neural-border p-4 flex items-start gap-3 animate-fade-up">
+              <span className="text-lg mt-0.5">🌱</span>
+              <div className="flex-1">
+                <p className="text-slate-200 text-sm">
+                  Some material is about to fade — a 2-minute review locks it in.
+                </p>
+                <button
+                  onClick={() => navigate("/checks")}
+                  className="text-neural text-xs font-medium mt-1"
+                >
+                  Quick review →
+                </button>
+              </div>
+              <button
+                onClick={() => { dismissNudge(); setPendingChecks(0); }}
+                className="text-slate-600 text-xs hover:text-slate-400 px-1"
+                aria-label="Dismiss"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
           <div>
             <h1 className="text-3xl font-bold text-white leading-tight">
               Paste what you
@@ -103,6 +148,33 @@ export default function Paste() {
           <p className="text-center text-slate-600 text-xs">
             ⌘ + Enter to submit · Your data stays private
           </p>
+
+          {/* Recent materials — jump straight back in (cached, no re-analysis) */}
+          {recents.length > 0 && (
+            <div>
+              <p className="text-slate-600 text-[10px] font-medium uppercase tracking-widest mb-2">
+                Recent
+              </p>
+              <div className="flex flex-col gap-2">
+                {recents.map((r) => (
+                  <button
+                    key={r.id}
+                    onClick={() => {
+                      setState({ lastMaterialId: r.id, lastMaterialTitle: r.title });
+                      navigate(`/plan?m=${r.id}`);
+                    }}
+                    className="w-full text-left rounded-xl bg-ink-700/60 neural-border px-4 py-3
+                               hover:bg-ink-600 active:scale-[0.99] transition-all"
+                  >
+                    <p className="text-slate-300 text-sm truncate">{r.title}</p>
+                    <p className="text-slate-600 text-[10px] mt-0.5">
+                      {new Date(r.ts).toLocaleDateString()} · tap to continue
+                    </p>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
