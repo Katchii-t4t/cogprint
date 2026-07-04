@@ -3,6 +3,20 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { currentUserId, getState } from "../store";
 import { buildView, label, type InsightView } from "../insights";
+import FingerprintArt from "../components/FingerprintArt";
+
+/** Fixed technique order so the art's 7 roots always map the same way
+    (identical structure in real and sham modes). */
+const TECH_ORDER = [
+  "spaced_repetition", "active_recall", "re_reading", "mind_maps",
+  "interleaving", "elaborative_interrogation", "practice_testing",
+];
+
+function vigorFrom(view: InsightView | null): number[] {
+  if (!view) return [];
+  const byTech = new Map(view.techniqueRows.map((r) => [r.technique, r.barFraction]));
+  return TECH_ORDER.map((t) => byTech.get(t) ?? 0);
+}
 
 const EFFECTIVENESS_COLORS: Record<string, string> = {
   best: "bg-neural",
@@ -111,6 +125,15 @@ export default function Grow() {
         {/* Medium / high — full fingerprint */}
         {confidence !== "low" && v && (
           <>
+            {/* The living fingerprint — the payoff, front and centre */}
+            <div className="flex justify-center animate-fade-up -mt-2">
+              <FingerprintArt
+                seed={currentUserId() ?? 1}
+                sessions={sessionCount}
+                vigor={vigorFrom(v)}
+                size={272}
+              />
+            </div>
             {/* Top technique */}
             {v.topTechnique && (
               <Section title="Best technique for you">
@@ -263,34 +286,15 @@ function ConfidencePill({ confidence }: { confidence: string }) {
 
 function GrowingState({ sessionCount, onStudy }: { sessionCount: number; onStudy: () => void }) {
   const needed = Math.max(0, 5 - sessionCount);
-  const fraction = Math.min(1, sessionCount / 5);
 
   return (
     <div className="rounded-3xl bg-ink-700 neural-border p-6 flex flex-col items-center gap-6 animate-fade-up">
-      {/* Fingerprint bloom animation */}
-      <div className="relative w-32 h-32">
-        <svg viewBox="0 0 128 128" className="w-full h-full">
-          {/* Outer rings — grow with data */}
-          {[48, 38, 28, 18].map((r, i) => (
-            <circle
-              key={r}
-              cx="64"
-              cy="64"
-              r={r}
-              fill="none"
-              stroke="#22d3ee"
-              strokeWidth="1"
-              strokeDasharray={`${2 * Math.PI * r}`}
-              strokeDashoffset={`${2 * Math.PI * r * (1 - fraction * (1 - i * 0.18))}`}
-              opacity={0.2 + i * 0.15}
-              className="transition-all duration-1000"
-            />
-          ))}
-          {/* Core */}
-          <circle cx="64" cy="64" r="8" fill="rgba(34,211,238,0.2)" />
-          <circle cx="64" cy="64" r="4" fill="#22d3ee" className="breathe" />
-        </svg>
-      </div>
+      {/* The young fingerprint — same organism the user will watch grow */}
+      <FingerprintArt
+        seed={currentUserId() ?? 1}
+        sessions={sessionCount}
+        size={200}
+      />
 
       <div className="text-center">
         <p className="text-white font-semibold">Your fingerprint is growing</p>
