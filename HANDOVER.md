@@ -322,6 +322,7 @@ cd frontend && npx tsc --noEmit
 | 2026-06-07 | Bot B (sgkar's PC) | Production-hardening pass (see below) | ✅ done |
 | 2026-06-07 | Bot B (sgkar's PC) | Consumer-app build STARTED: Agent 4 question-gen (LLM, isolated) done. Full plan + API contract in **`CONSUMER_APP_BUILD.md`**. | ✅ handed off |
 | 2026-06-07 | Bot B (sgkar's PC) | Step A backend done: bad-question flag (`POST /materials/{id}/questions/flag`), stable card ids, flagged-card exclusion. 24 tests passing. Next: Screens 1–4 (frontend). | ✅ done |
+| 2026-07-04 | Bot B (sgkar, overnight) | Ideal-product polish on `app/`: generative FingerprintArt centrepiece; **sham made visually indistinguishable** (verified in browser vs real); question pre-gen on analyze; recents strip; forgetting-nudge (dismissible, ~6h). Build+PWA green. | ✅ done |
 | 2026-06-18 | Bot A (Karthik's PC) | **Consumer app built (`app/`) — all 4 screens + retention checks, verified end-to-end against the live backend.** See "Bot A — consumer app" below. | ✅ done |
 
 **Bot B pass — what landed (commits `0e0acd7`..`6501f8d`):**

@@ -15,7 +15,13 @@ dark redesign is already done. See the build-status box below and `app/README.md
 > - ✅ **Screen 4 Grow** (`Grow.tsx`) — growing fingerprint + bars/grid/insights.
 > - ✅ **Checks** (`Checks.tsx`) — 24h/7d retention flow for returning users.
 > - ✅ **Real/sham `InsightProvider`** (`insights.ts`), **dark theme**, **PWA**.
-> - ⏳ Real flashcards need the API key set; ⏳ deploy; ⏳ richer sham content.
+> - ✅ **(2026-07-04, Bot B)** Living generative fingerprint art
+>   (`components/FingerprintArt.tsx`) — per-user, data-grown, the centrepiece;
+>   **sham made visually indistinguishable** (deterministic per-user bars/grid/
+>   insights — verified in-browser vs real); questions **pre-generated** after
+>   analysis (no wait at Cards); **recents strip** + **forgetting-nudge**
+>   (dismissible, ~6h rate-limit) on Paste.
+> - ⏳ Real flashcards need the API key set; ⏳ deploy.
 > - ⚠️ Built as a **new `app/` folder** (the recommended option in §6), NOT a
 >   restyle of `frontend/` — the research platform is untouched.
 
