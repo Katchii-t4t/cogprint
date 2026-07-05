@@ -8,6 +8,11 @@ flashcards need `ANTHROPIC_API_KEY`; deploy; explicit sham-content polish. The
 dark redesign is already done. See the build-status box below and `app/README.md`.
 **Read order:** this file → `app/README.md` → `HANDOVER.md` (backend) → the code.
 
+⏳ **Next planned feature:** [`QUIZ_MODE_BUILD.md`](./QUIZ_MODE_BUILD.md) — replacing
+self-reported flashcards as the primary data-capture mechanic with objectively-graded
+quiz questions (multiple-choice), keeping flashcards as a secondary, unscored practice
+mode. Designed 2026-07-05, not yet built.
+
 > ### Build status (2026-06-18)
 > - ✅ **Screen 1 Paste** (`app/src/pages/Paste.tsx`) — analyse + anonymous user.
 > - ✅ **Screen 2 Plan** (`Plan.tsx`) — 14-day plan, rationale, Pomodoro timer.
@@ -29,7 +34,17 @@ dark redesign is already done. See the build-status box below and `app/README.md
 >   unobtrusive "skip straight to flashcards" link keeps it non-mandatory).
 >   Material text is cached client-side (`store.lastMaterialText`) since the
 >   backend has no `GET /materials/{id}`.
-> - ⏳ Real flashcards need the API key set; ⏳ deploy.
+> - ✅ **(2026-07-05, Bot B)** Real flashcard generation verified live against
+>   Claude Opus 4.8 — `ANTHROPIC_API_KEY` is now configured in `cogprint/.env`
+>   (gitignored). Tested on real Norwegian academic content (linear algebra) —
+>   questions generated correctly, UTF-8 (æøå) renders fine everywhere.
+> - ⏳ **Design decision (2026-07-05):** current flashcards are self-reported
+>   (Again/Got it), which reintroduces the self-report bias the project exists
+>   to avoid. Plan: add an objectively-graded **Quiz mode** (multiple-choice) as
+>   the primary/default mode that feeds the fingerprint; keep flashcards as a
+>   secondary, unscored practice mode. Full spec: `QUIZ_MODE_BUILD.md`. Not
+>   built yet.
+> - ⏳ Deploy.
 > - ⚠️ Built as a **new `app/` folder** (the recommended option in §6), NOT a
 >   restyle of `frontend/` — the research platform is untouched.
 
