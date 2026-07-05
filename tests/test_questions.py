@@ -115,3 +115,58 @@ def test_flag_is_idempotent_and_validates(client, monkeypatch):
     assert client.post(f"/materials/{mid}/questions/flag", json={"card_id": 99}).status_code == 404
     # Negative card_id rejected by the schema -> 422.
     assert client.post(f"/materials/{mid}/questions/flag", json={"card_id": -1}).status_code == 422
+
+
+def test_distractors_roundtrip_cache_and_flag(client, monkeypatch):
+    """Quiz mode: distractors survive generation -> cache -> flag exclusion."""
+    canned = GeneratedFlashcards(cards=[
+        Flashcard(question="Q0", answer="A0", concept="c0",
+                  distractors=["W1", "W2", "W3"]),
+        Flashcard(question="Q1", answer="A1", concept="c1",
+                  distractors=["X1", "X2", "X3"]),
+    ])
+    monkeypatch.setattr(qg, "generate_flashcards", lambda *a, **k: canned)
+    mid = _make_material(client)
+
+    r1 = client.post(f"/materials/{mid}/questions").json()
+    assert [c["distractors"] for c in r1["cards"]] == [["W1", "W2", "W3"], ["X1", "X2", "X3"]]
+
+    # Cache round-trip preserves distractors.
+    r2 = client.post(f"/materials/{mid}/questions").json()
+    assert r2["generated_by"] == "cache"
+    assert r2["cards"][0]["distractors"] == ["W1", "W2", "W3"]
+
+    # Flag exclusion still works with distractors present.
+    client.post(f"/materials/{mid}/questions/flag", json={"card_id": 0})
+    r3 = client.post(f"/materials/{mid}/questions").json()
+    assert [c["id"] for c in r3["cards"]] == [1]
+    assert r3["cards"][0]["distractors"] == ["X1", "X2", "X3"]
+
+
+def test_old_cache_without_distractors_still_parses(client, monkeypatch):
+    """A questions_json blob written before the distractors field existed must
+    parse cleanly (default []) rather than 500 — quiz mode falls back per-card."""
+    import database
+
+    _mock_three_cards(monkeypatch)
+    mid = _make_material(client)
+    client.post(f"/materials/{mid}/questions")
+
+    # Overwrite the cache with the pre-distractors shape.
+    db = database.SessionLocal()
+    try:
+        mat = db.get(database.Material, mid)
+        mat.questions_json = (
+            '{"cards": [{"question": "Old Q", "answer": "Old A", '
+            '"concept": "old", "difficulty": "intermediate"}], "flagged": []}'
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    r = client.post(f"/materials/{mid}/questions")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["generated_by"] == "cache"
+    assert body["cards"][0]["question"] == "Old Q"
+    assert body["cards"][0]["distractors"] == []  # defaulted, not crashed

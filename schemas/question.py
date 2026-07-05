@@ -29,6 +29,18 @@ class Flashcard(BaseModel):
         default="intermediate",
         description="One of: foundational, intermediate, advanced.",
     )
+    # default_factory keeps old cached questions_json blobs (written before this
+    # field existed) parsing cleanly; an empty list means "quiz mode unavailable
+    # for this card — fall back to flashcard display" (see QUIZ_MODE_BUILD.md).
+    distractors: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Exactly 3 plausible but incorrect short answers, at the same "
+            "difficulty tier as the correct answer. Each must be clearly wrong "
+            "to someone who has read the material — no joke answers, and none "
+            "may duplicate or trivially rephrase the correct answer."
+        ),
+    )
 
 
 class GeneratedFlashcards(BaseModel):
