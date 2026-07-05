@@ -105,8 +105,7 @@ export default function FingerprintArt({
   }, []);
 
   const branches = useMemo(() => buildBranches(seed, sessions, vigor),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [seed, sessions, JSON.stringify(vigor)]);
+    [seed, sessions, vigor]);
 
   // Per-user hue shift keeps it on-brand cyan but subtly personal (172–204).
   const hue = 172 + (Math.abs(seed * 2654435761) % 33);

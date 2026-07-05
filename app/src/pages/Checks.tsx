@@ -13,6 +13,9 @@ export default function Checks() {
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
   const [loading, setLoading] = useState(true);
+  // Lazy initializer: runs once on first render only, React's sanctioned way
+  // to read the clock without repeating the impure call on every render.
+  const [now] = useState(() => Date.now());
 
   useEffect(() => {
     const userId = currentUserId();
@@ -75,9 +78,7 @@ export default function Checks() {
   }
 
   const check = checks[current];
-  const daysSince = Math.round(
-    (Date.now() - new Date(check.session_date).getTime()) / 86_400_000
-  );
+  const daysSince = Math.round((now - new Date(check.session_date).getTime()) / 86_400_000);
 
   return (
     <div className="flex flex-col min-h-dvh bg-ink-900 max-w-lg mx-auto w-full px-4 py-8">

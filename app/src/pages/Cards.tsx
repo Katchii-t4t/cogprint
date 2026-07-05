@@ -29,7 +29,11 @@ export default function Cards() {
   const [logging, setLogging] = useState(false);
 
   const touchStartX = useRef(0);
-  const startTime = useRef(Date.now());
+  const startTime = useRef(0);
+
+  useEffect(() => {
+    startTime.current = Date.now();
+  }, []);
 
   useEffect(() => {
     const userId = currentUserId();
