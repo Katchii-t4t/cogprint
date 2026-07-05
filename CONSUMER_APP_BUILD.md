@@ -8,10 +8,13 @@ flashcards need `ANTHROPIC_API_KEY`; deploy; explicit sham-content polish. The
 dark redesign is already done. See the build-status box below and `app/README.md`.
 **Read order:** this file → `app/README.md` → `HANDOVER.md` (backend) → the code.
 
-⏳ **Next planned feature:** [`QUIZ_MODE_BUILD.md`](./QUIZ_MODE_BUILD.md) — replacing
-self-reported flashcards as the primary data-capture mechanic with objectively-graded
-quiz questions (multiple-choice), keeping flashcards as a secondary, unscored practice
-mode. Designed 2026-07-05, not yet built.
+✅ **Quiz mode built** ([`QUIZ_MODE_BUILD.md`](./QUIZ_MODE_BUILD.md)) — objectively-graded
+multiple-choice is the primary/default study round; flashcards demoted to unscored practice.
+
+⏳ **Next planned features:** [`NEXT_FEATURES_BUILD.md`](./NEXT_FEATURES_BUILD.md) — four
+independent, ready-to-build features: (1) shareable fingerprint PNG (the growth engine),
+(2) photo→OCR material input (Claude vision), (3) smart per-topic forgetting nudges
+(Ebbinghaus-based), (4) "save your progress" name + restore-by-ID. Designed 2026-07-05.
 
 > ### Build status (2026-06-18)
 > - ✅ **Screen 1 Paste** (`app/src/pages/Paste.tsx`) — analyse + anonymous user.
