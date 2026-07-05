@@ -1,7 +1,10 @@
 # CogPrint — Quiz Mode (primary) + Flashcard Mode (secondary, practice-only)
 
-**Status:** ⏳ PLANNED, not built yet. Design decided 2026-07-05; ready for a fresh
-session to implement.
+**Status:** ✅ **BUILT & VERIFIED** (2026-07-05, Bot B). All acceptance criteria met:
+26/26 backend tests, eslint + build clean, and browser-verified end-to-end — a quiz
+round logged exactly one session (objectively-graded score), a flashcard round logged
+none, the practice banner renders, and real distractors (3 per card) were generated
+live by Claude Opus 4.8. This document is kept as the design record.
 **Read order:** `CONSUMER_APP_BUILD.md` (product vision + current state) → this file
 (this specific feature) → `HANDOVER.md` (backend deep-dive) → the code.
 

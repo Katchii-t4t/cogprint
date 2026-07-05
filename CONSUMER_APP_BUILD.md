@@ -38,12 +38,16 @@ mode. Designed 2026-07-05, not yet built.
 >   Claude Opus 4.8 — `ANTHROPIC_API_KEY` is now configured in `cogprint/.env`
 >   (gitignored). Tested on real Norwegian academic content (linear algebra) —
 >   questions generated correctly, UTF-8 (æøå) renders fine everywhere.
-> - ⏳ **Design decision (2026-07-05):** current flashcards are self-reported
->   (Again/Got it), which reintroduces the self-report bias the project exists
->   to avoid. Plan: add an objectively-graded **Quiz mode** (multiple-choice) as
->   the primary/default mode that feeds the fingerprint; keep flashcards as a
->   secondary, unscored practice mode. Full spec: `QUIZ_MODE_BUILD.md`. Not
->   built yet.
+> - ✅ **(2026-07-05, Bot B) Quiz mode is live** (`QUIZ_MODE_BUILD.md`): the
+>   default study round is now objectively-graded multiple-choice (answer + 3
+>   LLM-generated distractors, shuffled, string-equality grading, no LLM at
+>   answer time) — the ONLY mode that logs sessions/feeds the fingerprint.
+>   Flashcards remain as a secondary, explicitly unscored practice mode
+>   ("Practice round — not scored" banner). Old cached question sets without
+>   distractors fall back to flashcard display per-card and are excluded from
+>   scores. Browser-verified: quiz round → 1 session; flashcard round → 0.
+>   Also fixed a real pre-existing scoring bug (stale-state read dropped the
+>   final card's answer from every round score).
 > - ⏳ Deploy.
 > - ⚠️ Built as a **new `app/` folder** (the recommended option in §6), NOT a
 >   restyle of `frontend/` — the research platform is untouched.
