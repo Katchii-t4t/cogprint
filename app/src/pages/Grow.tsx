@@ -4,6 +4,7 @@ import { api } from "../api";
 import { currentUserId, getState } from "../store";
 import { buildView, label, type InsightView } from "../insights";
 import FingerprintArt from "../components/FingerprintArt";
+import { renderShareCard, shareFingerprint } from "../lib/shareCard";
 
 /** Fixed technique order so the art's 7 roots always map the same way
     (identical structure in real and sham modes). */
@@ -34,6 +35,25 @@ export default function Grow() {
   const [view, setView] = useState<InsightView | null>(null);
   const [pending, setPending] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [sharing, setSharing] = useState(false);
+
+  async function handleShare(v: InsightView) {
+    if (sharing) return;
+    setSharing(true);
+    try {
+      const blob = await renderShareCard({
+        seed: currentUserId() ?? 1,
+        sessions: v.sessionCount,
+        vigor: vigorFrom(v),
+        confidence: v.confidence,
+      });
+      await shareFingerprint(blob);
+    } catch {
+      // Rendering/share failed — stay quiet; the on-screen art is unaffected.
+    } finally {
+      setSharing(false);
+    }
+  }
 
   useEffect(() => {
     const userId = currentUserId();
@@ -142,13 +162,23 @@ export default function Grow() {
         {confidence !== "low" && v && (
           <>
             {/* The living fingerprint — the payoff, front and centre */}
-            <div className="flex justify-center animate-fade-up -mt-2">
+            <div className="flex flex-col items-center animate-fade-up -mt-2">
               <FingerprintArt
                 seed={currentUserId() ?? 1}
                 sessions={sessionCount}
                 vigor={vigorFrom(v)}
                 size={272}
               />
+              {/* The growth engine: every shared fingerprint is marketing */}
+              <button
+                onClick={() => handleShare(v)}
+                disabled={sharing}
+                className="mt-1 px-5 py-2 rounded-full bg-ink-700 neural-border text-neural text-xs
+                           font-semibold hover:bg-ink-600 active:scale-[0.97] transition-all
+                           disabled:opacity-50"
+              >
+                {sharing ? "Rendering…" : "⤴ Share your fingerprint"}
+              </button>
             </div>
             {/* Top technique */}
             {v.topTechnique && (
