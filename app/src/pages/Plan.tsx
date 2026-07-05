@@ -4,7 +4,6 @@ import { api } from "../api";
 import { currentUserId, lastMaterialId as storedMaterialId } from "../store";
 import type { StudyPlanResponse, StudyPlanDay, PendingCheckItem } from "../types";
 import { label } from "../insights";
-import Timer from "../components/Timer";
 
 const TECHNIQUE_ICONS: Record<string, string> = {
   spaced_repetition: "🔁",
@@ -71,9 +70,6 @@ export default function Plan() {
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 pb-32">
-        {/* Focus timer — defaults to today's recommended session length */}
-        <Timer focusMinutes={plan.days[0]?.session_duration_minutes ?? 25} />
-
         {/* Pending checks banner */}
         {pending.length > 0 && (
           <div
@@ -100,13 +96,19 @@ export default function Plan() {
       </div>
 
       {/* CTA */}
-      <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-lg px-4 pb-6 pt-4 glass border-t border-ink-500/30">
+      <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-lg px-4 pb-6 pt-4 glass border-t border-ink-500/30 flex flex-col items-center gap-2">
         <button
-          onClick={() => navigate(materialId ? `/cards?m=${materialId}` : "/cards")}
+          onClick={() => navigate(materialId ? `/study?m=${materialId}` : "/study")}
           className="w-full py-4 rounded-2xl bg-neural text-ink-900 font-bold text-base
                      hover:bg-neural-glow active:scale-[0.98] transition-all"
         >
-          Start flashcards →
+          Begin studying →
+        </button>
+        <button
+          onClick={() => navigate(materialId ? `/cards?m=${materialId}` : "/cards")}
+          className="text-slate-500 text-xs hover:text-slate-300"
+        >
+          Skip straight to flashcards
         </button>
       </div>
     </div>

@@ -18,6 +18,9 @@ export interface AppState {
   lastMaterialId: number | null;
   /** Title of the last material, for friendlier headings. */
   lastMaterialTitle: string | null;
+  /** The raw pasted text, kept client-side so the Study screen can show it
+      without a round trip — the backend has no GET /materials/{id}. */
+  lastMaterialText: string | null;
   /** Recently analysed materials (newest first) — cached on the backend, so
       re-opening one is instant: no re-analysis, no re-generation. */
   recents: RecentMaterial[];
@@ -30,6 +33,7 @@ const EMPTY: AppState = {
   group: null,
   lastMaterialId: null,
   lastMaterialTitle: null,
+  lastMaterialText: null,
   recents: [],
   nudgeDismissedAt: null,
 };

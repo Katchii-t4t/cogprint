@@ -49,6 +49,7 @@ export default function Paste() {
       setState({
         lastMaterialId: result.material_id,
         lastMaterialTitle: result.knowledge_map.title,
+        lastMaterialText: trimmed,
       });
       addRecent(result.material_id, result.knowledge_map.title);
 
