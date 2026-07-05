@@ -28,6 +28,7 @@ const EFFECTIVENESS_COLORS: Record<string, string> = {
 export default function Grow() {
   const [params] = useSearchParams();
   const score = params.get("score");
+  const practice = params.get("practice") === "1";
   const navigate = useNavigate();
 
   const [view, setView] = useState<InsightView | null>(null);
@@ -73,6 +74,21 @@ export default function Grow() {
             Study plan →
           </button>
         </div>
+
+        {/* Practice banner — flashcard rounds are rehearsal, never measurement */}
+        {practice && (
+          <div className="rounded-2xl bg-ink-700 neural-border p-4 mb-4 animate-fade-up">
+            <div className="flex items-center gap-3">
+              <span className="text-3xl">🌿</span>
+              <div>
+                <p className="text-white font-bold">Practice round — not scored</p>
+                <p className="text-slate-400 text-xs">
+                  Flashcards are rehearsal. Quiz rounds are what grow your fingerprint.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Score banner */}
         {score !== null && (

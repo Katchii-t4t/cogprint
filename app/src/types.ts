@@ -151,6 +151,9 @@ export interface Flashcard {
   concept: string;
   difficulty: string;
   flagged: boolean;
+  /** 3 plausible wrong answers for quiz mode. Empty on cards generated before
+      this field existed — those fall back to flashcard display. */
+  distractors: string[];
 }
 
 export interface QuestionsResponse {

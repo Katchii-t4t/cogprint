@@ -4,6 +4,18 @@ import { api } from "../api";
 import { currentUserId, currentHour, lastMaterialId as storedMaterialId } from "../store";
 import type { Flashcard } from "../types";
 
+/**
+ * The study round. Two modes over one shared question bank:
+ *
+ *  - QUIZ (default) — multiple-choice, objectively graded by string equality.
+ *    The ONLY mode that logs a session and feeds the fingerprint. Cards whose
+ *    distractors are missing (pre-quiz cache) fall back to flashcard display
+ *    inside the round and are excluded from the score.
+ *  - FLASHCARDS — the classic tap-to-reveal / Again / Got it self-report loop.
+ *    Practice only: never logs a session, never touches the fingerprint.
+ */
+
+type Mode = "quiz" | "flash";
 type CardState = "front" | "back";
 type Result = "correct" | "wrong";
 
@@ -11,6 +23,24 @@ interface CardResult {
   cardId: number;
   correct: boolean;
   flagged: boolean;
+  /** True only for objectively-graded (multiple-choice) answers — the only
+      results allowed to feed the fingerprint. */
+  measured: boolean;
+}
+
+/** Reading the clock is a legitimate side effect in event handlers, but the
+    react-hooks purity lint can't statically tell handlers from render helpers,
+    so the impure call lives behind this module-scope helper. */
+const now = () => Date.now();
+
+/** Fisher–Yates, non-mutating. */
+function shuffle<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
 }
 
 export default function Cards() {
@@ -18,9 +48,14 @@ export default function Cards() {
   const materialId = params.get("m") ? Number(params.get("m")) : storedMaterialId();
   const navigate = useNavigate();
 
+  const [mode, setMode] = useState<Mode>("quiz");
   const [cards, setCards] = useState<Flashcard[]>([]);
+  /** cardId -> shuffled options (answer + distractors), fixed for the round so
+      the correct answer's position can't become a pattern mid-card. */
+  const [options, setOptions] = useState<Record<number, string[]>>({});
   const [idx, setIdx] = useState(0);
   const [cardState, setCardState] = useState<CardState>("front");
+  const [picked, setPicked] = useState<string | null>(null);
   const [results, setResults] = useState<CardResult[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -30,9 +65,14 @@ export default function Cards() {
 
   const touchStartX = useRef(0);
   const startTime = useRef(0);
+  const endTime = useRef(0);
+  const advanceTimer = useRef<number | null>(null);
 
   useEffect(() => {
-    startTime.current = Date.now();
+    startTime.current = now();
+    return () => {
+      if (advanceTimer.current) window.clearTimeout(advanceTimer.current);
+    };
   }, []);
 
   useEffect(() => {
@@ -41,7 +81,19 @@ export default function Cards() {
 
     api
       .getQuestions(materialId)
-      .then((r) => setCards(r.cards.filter((c) => !c.flagged)))
+      .then((r) => {
+        const active = r.cards.filter((c) => !c.flagged);
+        setCards(active);
+        // Shuffle each card's options once per round (in the effect, not in
+        // render, so the order is stable and the render stays pure).
+        const opts: Record<number, string[]> = {};
+        for (const c of active) {
+          if (c.distractors.length > 0) {
+            opts[c.id] = shuffle([c.answer, ...c.distractors]);
+          }
+        }
+        setOptions(opts);
+      })
       .catch((e) => {
         if (e.message.startsWith("503")) {
           setNeedsSetup(true);
@@ -53,78 +105,119 @@ export default function Cards() {
   }, [materialId, navigate]);
 
   const current = cards[idx];
+  // A card is quiz-gradeable only if it has distractors (older cached sets don't).
+  const quizable = current ? (options[current.id]?.length ?? 0) > 0 : false;
+  const quizCard = mode === "quiz" && quizable;
+
+  function switchMode(next: Mode) {
+    if (next === mode) return;
+    // Switching restarts the round — mixed-mode scores would be meaningless.
+    if (advanceTimer.current) window.clearTimeout(advanceTimer.current);
+    setMode(next);
+    setIdx(0);
+    setResults([]);
+    setCardState("front");
+    setPicked(null);
+    setSwipeX(0);
+    startTime.current = now();
+  }
 
   function flip() {
-    if (cardState === "front") setCardState("back");
+    if (!quizCard && cardState === "front") setCardState("back");
   }
 
   async function flag() {
-    if (!materialId || !current) return;
+    if (!materialId || !current || picked !== null) return;
     await api.flagQuestion(materialId, current.id).catch(() => {});
-    setResults((r) => [...r, { cardId: current.id, correct: false, flagged: true }]);
-    advance();
+    advanceWith([...results, { cardId: current.id, correct: false, flagged: true, measured: false }]);
   }
 
+  /** Flashcard-style self-report (flash mode, or fallback cards in quiz mode).
+      Never measured. */
   function answer(result: Result) {
-    setResults((r) => [
-      ...r,
-      { cardId: current.id, correct: result === "correct", flagged: false },
+    endTime.current = now();
+    advanceWith([
+      ...results,
+      { cardId: current.id, correct: result === "correct", flagged: false, measured: false },
     ]);
-    advance();
   }
 
-  function advance() {
+  /** Quiz answer: objective, deterministic grading by string equality. */
+  function pick(option: string) {
+    if (picked !== null) return; // ignore double-taps while feedback shows
+    setPicked(option);
+    const correct = option === current.answer;
+    const next = [
+      ...results,
+      { cardId: current.id, correct, flagged: false, measured: true },
+    ];
+    endTime.current = now();
+    // Brief pause so the feedback lands — longer on a miss so the correct
+    // answer can actually be read. (Transitions themselves stay ≤300ms.)
+    advanceTimer.current = window.setTimeout(
+      () => advanceWith(next),
+      correct ? 600 : 1400
+    );
+  }
+
+  function advanceWith(nextResults: CardResult[]) {
+    setResults(nextResults);
     setCardState("front");
+    setPicked(null);
     setSwipeX(0);
     if (idx < cards.length - 1) {
       setIdx((i) => i + 1);
     } else {
-      finish();
+      finish(nextResults);
     }
   }
 
-  async function finish() {
-    setLogging(true);
+  async function finish(finalResults: CardResult[]) {
     const userId = currentUserId();
     if (!userId) { navigate("/"); return; }
 
-    const nonFlagged = results.filter((r) => !r.flagged);
-    const score =
-      nonFlagged.length > 0
-        ? nonFlagged.filter((r) => r.correct).length / nonFlagged.length
-        : 0;
+    // Only objectively-graded answers may produce measurement.
+    const gradeable = finalResults.filter((r) => r.measured && !r.flagged);
 
-    const durationMin = Math.max(
-      1,
-      Math.round((Date.now() - startTime.current) / 60_000)
-    );
-
-    try {
-      await api.logSession({
-        user_id: userId,
-        material_id: materialId ?? undefined,
-        technique: "active_recall",
-        duration_minutes: durationMin,
-        time_of_day: currentHour(),
-        quiz_score: score,
-      });
-    } catch {
-      // fingerprint rebuild is best-effort
+    if (mode === "quiz" && gradeable.length > 0) {
+      setLogging(true);
+      const score = gradeable.filter((r) => r.correct).length / gradeable.length;
+      // endTime is stamped in the answer handlers (pick/answer) — reading the
+      // clock here would trip the react-hooks purity rule via the timer path.
+      const durationMin = Math.max(
+        1,
+        Math.round((endTime.current - startTime.current) / 60_000)
+      );
+      try {
+        await api.logSession({
+          user_id: userId,
+          material_id: materialId ?? undefined,
+          technique: "active_recall",
+          duration_minutes: durationMin,
+          time_of_day: currentHour(),
+          quiz_score: score,
+        });
+      } catch {
+        // fingerprint rebuild is best-effort
+      }
+      navigate(`/grow?score=${Math.round(score * 100)}`);
+    } else {
+      // Flash mode — or a quiz round with zero gradeable cards (stale cache).
+      // Practice only: no session, no score, no fingerprint effect.
+      navigate("/grow?practice=1");
     }
-
-    navigate(`/grow?score=${Math.round(score * 100)}`);
   }
 
-  // Touch swipe handlers
+  // Touch swipe handlers (flashcard-style cards only)
   function onTouchStart(e: React.TouchEvent) {
     touchStartX.current = e.touches[0].clientX;
   }
   function onTouchMove(e: React.TouchEvent) {
-    if (cardState !== "back") return;
+    if (quizCard || cardState !== "back") return;
     setSwipeX(e.touches[0].clientX - touchStartX.current);
   }
   function onTouchEnd() {
-    if (cardState !== "back") return;
+    if (quizCard || cardState !== "back") return;
     if (swipeX > 80) answer("correct");
     else if (swipeX < -80) answer("wrong");
     else setSwipeX(0);
@@ -146,11 +239,12 @@ export default function Cards() {
   }
 
   const progress = idx / cards.length;
+  const opts = quizCard ? options[current.id] : [];
 
   return (
     <div className="flex flex-col min-h-dvh bg-ink-900 max-w-lg mx-auto w-full px-4 py-8">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-4">
         <button onClick={() => navigate("/")} className="text-slate-500 text-sm hover:text-slate-300">
           ✕
         </button>
@@ -165,6 +259,31 @@ export default function Cards() {
         </button>
       </div>
 
+      {/* Mode toggle — Quiz is the default; flashcards are practice-only */}
+      <div className="flex flex-col items-center gap-1 mb-4">
+        <div className="flex bg-ink-700 rounded-full p-1 neural-border">
+          <button
+            onClick={() => switchMode("quiz")}
+            className={`px-4 py-1.5 rounded-full text-xs font-semibold transition-all ${
+              mode === "quiz" ? "bg-neural text-ink-900" : "text-slate-400 hover:text-slate-200"
+            }`}
+          >
+            Quiz
+          </button>
+          <button
+            onClick={() => switchMode("flash")}
+            className={`px-4 py-1.5 rounded-full text-xs font-semibold transition-all ${
+              mode === "flash" ? "bg-neural text-ink-900" : "text-slate-400 hover:text-slate-200"
+            }`}
+          >
+            Flashcards
+          </button>
+        </div>
+        {mode === "flash" && (
+          <span className="text-slate-600 text-[10px]">Practice — not scored</span>
+        )}
+      </div>
+
       {/* Progress bar */}
       <div className="h-1 bg-ink-500 rounded-full mb-8 overflow-hidden">
         <div
@@ -177,7 +296,7 @@ export default function Cards() {
       <div className="flex-1 flex flex-col items-center justify-center gap-6">
         <div
           className="w-full card-swipe-enter"
-          key={idx}
+          key={`${mode}-${idx}`}
           style={{
             transform: `translateX(${swipeX}px) rotate(${swipeX * 0.04}deg)`,
             transition: swipeX === 0 ? "transform 0.2s" : "none",
@@ -188,8 +307,10 @@ export default function Cards() {
           onClick={flip}
         >
           <div
-            className="w-full rounded-3xl bg-ink-700 neural-border p-8 cursor-pointer select-none
-                       min-h-[260px] flex flex-col items-center justify-center gap-4 relative"
+            className={`w-full rounded-3xl bg-ink-700 neural-border p-8 select-none
+                       min-h-[220px] flex flex-col items-center justify-center gap-4 relative ${
+                         quizCard ? "" : "cursor-pointer"
+                       }`}
             style={{
               boxShadow:
                 swipeX > 40
@@ -211,7 +332,11 @@ export default function Cards() {
               <span className="text-[10px] text-neural/60 font-medium">{current.concept}</span>
             </div>
 
-            {cardState === "front" ? (
+            {quizCard ? (
+              <p className="text-white text-center text-lg font-medium leading-snug">
+                {current.question}
+              </p>
+            ) : cardState === "front" ? (
               <>
                 <p className="text-white text-center text-lg font-medium leading-snug">
                   {current.question}
@@ -233,8 +358,40 @@ export default function Cards() {
           </div>
         </div>
 
-        {/* Answer buttons — only shown after flip */}
-        {cardState === "back" && (
+        {/* Quiz options — objective grading, one tap */}
+        {quizCard && (
+          <div className="w-full flex flex-col gap-2 animate-fade-up">
+            {opts.map((opt) => {
+              const isCorrect = opt === current.answer;
+              const isPicked = opt === picked;
+              let cls =
+                "bg-ink-700 neural-border text-slate-200 hover:bg-ink-600";
+              if (picked !== null) {
+                if (isCorrect) {
+                  cls = "bg-green-950/50 border border-green-500/60 text-green-300";
+                } else if (isPicked) {
+                  cls = "bg-red-950/50 border border-red-500/60 text-red-300";
+                } else {
+                  cls = "bg-ink-700 neural-border text-slate-500 opacity-50";
+                }
+              }
+              return (
+                <button
+                  key={opt}
+                  onClick={() => pick(opt)}
+                  disabled={picked !== null}
+                  className={`w-full py-3.5 px-4 rounded-2xl text-sm font-medium text-left
+                              transition-all duration-200 active:scale-[0.98] ${cls}`}
+                >
+                  {opt}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Flashcard answer buttons — only after flip, never on quiz cards */}
+        {!quizCard && cardState === "back" && (
           <div className="w-full flex gap-3 animate-fade-up">
             <button
               onClick={() => answer("wrong")}
@@ -255,13 +412,22 @@ export default function Cards() {
           </div>
         )}
 
-        {/* Flag button */}
-        <button
-          onClick={flag}
-          className="text-slate-600 text-xs hover:text-slate-400 transition-colors"
-        >
-          🚩 Confusing question? Flag it
-        </button>
+        {/* Fallback note: pre-quiz card inside a quiz round */}
+        {mode === "quiz" && !quizable && (
+          <p className="text-slate-600 text-[10px]">
+            Older card — shown as a flashcard, not counted in your score
+          </p>
+        )}
+
+        {/* Flag button — shared across modes, hidden once a quiz answer is locked */}
+        {picked === null && (
+          <button
+            onClick={flag}
+            className="text-slate-600 text-xs hover:text-slate-400 transition-colors"
+          >
+            🚩 Confusing question? Flag it
+          </button>
+        )}
       </div>
     </div>
   );
@@ -271,7 +437,7 @@ function LoadingState() {
   return (
     <div className="flex-1 flex flex-col items-center justify-center min-h-dvh gap-4 bg-ink-900">
       <div className="w-10 h-10 rounded-full border-2 border-neural/40 border-t-neural animate-spin" />
-      <p className="text-slate-400 text-sm">Generating flashcards…</p>
+      <p className="text-slate-400 text-sm">Generating questions…</p>
     </div>
   );
 }
@@ -309,9 +475,9 @@ function NeedsSetupState({
       <div className="flex-1 flex flex-col items-center justify-center gap-6 text-center">
         <div className="text-5xl">🔑</div>
         <div>
-          <h2 className="text-white font-bold text-xl">Flashcards need setup</h2>
+          <h2 className="text-white font-bold text-xl">Questions need setup</h2>
           <p className="text-slate-400 text-sm mt-2 leading-relaxed">
-            Flashcard generation is powered by an AI model that isn't configured
+            Question generation is powered by an AI model that isn't configured
             on this server yet. The rest of CogPrint — your study plan and your
             growing fingerprint — works right now.
           </p>
@@ -332,7 +498,7 @@ function NeedsSetupState({
         </div>
         <p className="text-slate-600 text-xs mt-4">
           Admin: set <code className="text-slate-500">ANTHROPIC_API_KEY</code> in the
-          backend <code className="text-slate-500">.env</code> to enable flashcards.
+          backend <code className="text-slate-500">.env</code> to enable questions.
         </p>
       </div>
     </div>
