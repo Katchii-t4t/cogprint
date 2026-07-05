@@ -137,6 +137,20 @@ class MaterialAnalysisResponse(BaseModel):
     knowledge_map: KnowledgeMap
 
 
+# --- Review suggestions (predicted forgetting) ---
+
+class ReviewSuggestion(BaseModel):
+    """One material's predicted-forgetting state, for the 'about to forget X'
+    nudge. Sorted ascending by predicted_retention by the endpoint."""
+
+    material_id: int
+    title: str
+    last_studied: datetime
+    days_since: float
+    predicted_retention: float  # R(t) = exp(-t/S), 0..1
+    fading: bool                # predicted_retention < FADING_THRESHOLD
+
+
 # --- Research export ---
 
 class ResearchExportRow(BaseModel):

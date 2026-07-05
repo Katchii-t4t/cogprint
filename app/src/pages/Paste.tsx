@@ -14,17 +14,31 @@ export default function Paste() {
   const [conceptCount, setConceptCount] = useState(0);
   const [error, setError] = useState("");
   const [recents] = useState<RecentMaterial[]>(() => getState().recents);
-  const [pendingChecks, setPendingChecks] = useState(0);
+  const [nudge, setNudge] = useState<
+    | { kind: "fade"; materialId: number; title: string }
+    | { kind: "checks"; count: number }
+    | null
+  >(null);
   const navigate = useNavigate();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Predicted-forgetting nudge — gentle, dismissible, rate-limited (~6h).
+  // Prefers naming the specific fading material (Ebbinghaus, from the user's
+  // own data); falls back to the generic pending-checks reminder.
   useEffect(() => {
     const { userId } = getState();
     if (!userId || !nudgeAllowed()) return;
-    api.getPendingChecks(userId)
-      .then((checks) => setPendingChecks(checks.length))
-      .catch(() => {});
+    Promise.all([
+      api.getReviewSuggestions(userId).catch(() => []),
+      api.getPendingChecks(userId).catch(() => []),
+    ]).then(([suggestions, checks]) => {
+      const fading = suggestions.find((s) => s.fading);
+      if (fading) {
+        setNudge({ kind: "fade", materialId: fading.material_id, title: fading.title });
+      } else if (checks.length > 0) {
+        setNudge({ kind: "checks", count: checks.length });
+      }
+    });
   }, []);
 
   async function handleSubmit() {
@@ -81,22 +95,34 @@ export default function Paste() {
       {phase === "idle" && (
         <div className="animate-fade-up flex flex-col flex-1 gap-6">
           {/* Predicted-forgetting nudge — gentle, dismissible */}
-          {pendingChecks > 0 && (
+          {nudge && (
             <div className="rounded-2xl bg-ink-700 neural-border p-4 flex items-start gap-3 animate-fade-up">
               <span className="text-lg mt-0.5">🌱</span>
               <div className="flex-1">
                 <p className="text-slate-200 text-sm">
-                  Some material is about to fade — a 2-minute review locks it in.
+                  {nudge.kind === "fade" ? (
+                    <>
+                      You're about to forget{" "}
+                      <span className="text-neural">
+                        “{nudge.title.length > 44 ? nudge.title.slice(0, 44) + "…" : nudge.title}”
+                      </span>{" "}
+                      — a 2-minute review locks it in.
+                    </>
+                  ) : (
+                    <>Some material is about to fade — a 2-minute review locks it in.</>
+                  )}
                 </p>
                 <button
-                  onClick={() => navigate("/checks")}
+                  onClick={() =>
+                    navigate(nudge.kind === "fade" ? `/cards?m=${nudge.materialId}` : "/checks")
+                  }
                   className="text-neural text-xs font-medium mt-1"
                 >
                   Quick review →
                 </button>
               </div>
               <button
-                onClick={() => { dismissNudge(); setPendingChecks(0); }}
+                onClick={() => { dismissNudge(); setNudge(null); }}
                 className="text-slate-600 text-xs hover:text-slate-400 px-1"
                 aria-label="Dismiss"
               >

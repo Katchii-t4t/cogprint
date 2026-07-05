@@ -144,6 +144,15 @@ export interface PendingCheckItem {
   due_date: string;
 }
 
+export interface ReviewSuggestion {
+  material_id: number;
+  title: string;
+  last_studied: string;
+  days_since: number;
+  predicted_retention: number;
+  fading: boolean;
+}
+
 export interface Flashcard {
   id: number;
   question: string;

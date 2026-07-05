@@ -8,6 +8,7 @@ import type {
   FingerprintResponse,
   PendingCheckItem,
   QuestionsResponse,
+  ReviewSuggestion,
   StudySession,
   RetentionCheck,
 } from "./types";
@@ -90,4 +91,9 @@ export const api = {
 
   getPendingChecks: (userId: number) =>
     req<PendingCheckItem[]>(`/users/${userId}/pending-checks`),
+
+  getReviewSuggestions: (userId: number) =>
+    req<ReviewSuggestion[]>(`/users/${userId}/review-suggestions`),
+
+  getUser: (userId: number) => req<User>(`/users/${userId}`),
 };

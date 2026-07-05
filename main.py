@@ -35,6 +35,7 @@ from schemas.session import (
     RetentionCheckCreate,
     RetentionCheckResponse,
     ResearchExportRow,
+    ReviewSuggestion,
     SessionCreate,
     SessionResponse,
     StudyPlanResponse,
@@ -514,6 +515,76 @@ def list_sessions(user_id: int, db: Session = Depends(get_db)):
         .all()
     )
     return sessions
+
+
+# ---------------------------------------------------------------------------
+# Review suggestions — predicted forgetting per material (deterministic)
+# ---------------------------------------------------------------------------
+
+@app.get("/users/{user_id}/review-suggestions", response_model=List[ReviewSuggestion])
+def get_review_suggestions(user_id: int, db: Session = Depends(get_db)):
+    """Per-material predicted retention via Ebbinghaus R(t)=exp(-t/S).
+
+    S is the user's own measured stability for the technique they last used on
+    that material (from their fingerprint's memory_profiles) when available,
+    else the population default. Control users' generic profiles carry no
+    memory_profiles, so they get the default automatically — blinding intact.
+    Sorted ascending by predicted retention (most-fading first).
+    """
+    from personalization.review import (
+        DEFAULT_STABILITY_DAYS,
+        FADING_THRESHOLD,
+        predicted_retention,
+    )
+
+    user = db.query(User).filter_by(id=user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    sessions = (
+        db.query(StudySession)
+        .filter(StudySession.user_id == user_id, StudySession.material_id.isnot(None))
+        .all()
+    )
+    if not sessions:
+        return []
+
+    # Most recent session per material.
+    latest: dict[int, StudySession] = {}
+    for s in sessions:
+        prev = latest.get(s.material_id)
+        if prev is None or s.created_at > prev.created_at:
+            latest[s.material_id] = s
+
+    # Personalised stability by technique, from the user's own fingerprint.
+    stability_by_tech: dict[str, float] = {}
+    fp = db.query(CognitiveFingerprint).filter_by(user_id=user_id).first()
+    if fp and fp.profile_json:
+        profile = load_profile(fp)
+        for m in profile.memory_profiles:
+            stability_by_tech[m.technique] = m.avg_stability_days
+
+    now = datetime.utcnow()
+    items: list[ReviewSuggestion] = []
+    for material_id, s in latest.items():
+        material = db.query(Material).filter_by(id=material_id).first()
+        if not material:
+            continue
+        days = max(0.0, (now - s.created_at).total_seconds() / 86400.0)
+        technique = s.technique.value if hasattr(s.technique, "value") else str(s.technique)
+        stability = stability_by_tech.get(technique, DEFAULT_STABILITY_DAYS)
+        r = predicted_retention(days, stability)
+        items.append(ReviewSuggestion(
+            material_id=material_id,
+            title=material.title,
+            last_studied=s.created_at,
+            days_since=round(days, 2),
+            predicted_retention=round(r, 4),
+            fading=r < FADING_THRESHOLD,
+        ))
+
+    items.sort(key=lambda x: x.predicted_retention)
+    return items
 
 
 # ---------------------------------------------------------------------------
