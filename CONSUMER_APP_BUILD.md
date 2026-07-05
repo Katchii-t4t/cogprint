@@ -21,6 +21,14 @@ dark redesign is already done. See the build-status box below and `app/README.md
 >   insights — verified in-browser vs real); questions **pre-generated** after
 >   analysis (no wait at Cards); **recents strip** + **forgetting-nudge**
 >   (dismissible, ~6h rate-limit) on Paste.
+> - ✅ **(2026-07-04, Bot B)** New **`Study.tsx`** screen — the spec's missing
+>   "Study / Focus mode" (§5): the pasted material shown distraction-free, a
+>   quiet corner tab that only comes alive when a focus interval ends (never
+>   auto-navigates), and a true full-screen calm timer mode in `Timer.tsx`.
+>   Route: `/study`, wired between Plan ("Begin studying →") and Cards (an
+>   unobtrusive "skip straight to flashcards" link keeps it non-mandatory).
+>   Material text is cached client-side (`store.lastMaterialText`) since the
+>   backend has no `GET /materials/{id}`.
 > - ⏳ Real flashcards need the API key set; ⏳ deploy.
 > - ⚠️ Built as a **new `app/` folder** (the recommended option in §6), NOT a
 >   restyle of `frontend/` — the research platform is untouched.
