@@ -13,6 +13,8 @@ export interface RecentMaterial {
 export interface AppState {
   userId: number | null;
   group: StudyGroup | null;
+  /** Display name, client-side only (no account, no login wall). */
+  name: string | null;
   /** Most recently analysed material — lets /plan and /grow recover it when
       it isn't in the URL (e.g. the user navigates back to the plan). */
   lastMaterialId: number | null;
@@ -31,6 +33,7 @@ export interface AppState {
 const EMPTY: AppState = {
   userId: null,
   group: null,
+  name: null,
   lastMaterialId: null,
   lastMaterialTitle: null,
   lastMaterialText: null,

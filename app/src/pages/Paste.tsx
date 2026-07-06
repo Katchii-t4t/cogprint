@@ -19,8 +19,27 @@ export default function Paste() {
     | { kind: "checks"; count: number }
     | null
   >(null);
+  const [restoreOpen, setRestoreOpen] = useState(false);
+  const [restoreId, setRestoreId] = useState("");
+  const [restoreErr, setRestoreErr] = useState("");
   const navigate = useNavigate();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  async function handleRestore() {
+    const id = parseInt(restoreId, 10);
+    if (!id || Number.isNaN(id)) {
+      setRestoreErr("Enter your numeric CogPrint ID (e.g. 42).");
+      return;
+    }
+    setRestoreErr("");
+    try {
+      const user = await api.getUser(id);
+      setState({ userId: user.id, group: user.group });
+      navigate("/grow");
+    } catch {
+      setRestoreErr("We couldn't find that ID — double-check it and try again.");
+    }
+  }
 
   // Predicted-forgetting nudge — gentle, dismissible, rate-limited (~6h).
   // Prefers naming the specific fading material (Ebbinghaus, from the user's
@@ -202,6 +221,40 @@ export default function Paste() {
               </div>
             </div>
           )}
+
+          {/* Restore by CogPrint ID — the other half of "save your progress" */}
+          <div className="text-center">
+            {!restoreOpen ? (
+              <button
+                onClick={() => setRestoreOpen(true)}
+                className="text-slate-600 text-xs hover:text-slate-400 transition-colors"
+              >
+                Have a CogPrint ID? Restore your progress
+              </button>
+            ) : (
+              <div className="flex flex-col gap-2 animate-fade-up">
+                <div className="flex gap-2">
+                  <input
+                    type="number"
+                    value={restoreId}
+                    onChange={(e) => setRestoreId(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleRestore()}
+                    placeholder="Your CogPrint ID, e.g. 42"
+                    className="flex-1 bg-ink-700 neural-border rounded-xl px-3 py-2 text-sm text-slate-200
+                               placeholder-slate-600 focus:outline-none focus:border-neural/50"
+                  />
+                  <button
+                    onClick={handleRestore}
+                    className="px-4 py-2 rounded-xl bg-ink-600 border border-ink-400 text-slate-200 text-sm
+                               font-medium hover:bg-ink-500 active:scale-[0.97] transition-all"
+                  >
+                    Restore
+                  </button>
+                </div>
+                {restoreErr && <p className="text-red-400 text-xs">{restoreErr}</p>}
+              </div>
+            )}
+          </div>
         </div>
       )}
 

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api";
-import { currentUserId, getState } from "../store";
+import { currentUserId, getState, setState } from "../store";
 import { buildView, label, type InsightView } from "../insights";
 import FingerprintArt from "../components/FingerprintArt";
 import { renderShareCard, shareFingerprint } from "../lib/shareCard";
@@ -36,6 +36,7 @@ export default function Grow() {
   const [pending, setPending] = useState(0);
   const [loading, setLoading] = useState(true);
   const [sharing, setSharing] = useState(false);
+  const [name, setName] = useState<string | null>(() => getState().name);
 
   async function handleShare(v: InsightView) {
     if (sharing) return;
@@ -146,7 +147,9 @@ export default function Grow() {
       <div className="flex-1 overflow-y-auto px-4 pb-24 space-y-6">
         {/* Fingerprint header */}
         <div className="animate-fade-up">
-          <h1 className="text-2xl font-bold text-white">Your fingerprint</h1>
+          <h1 className="text-2xl font-bold text-white">
+            {name ? `${name}'s fingerprint` : "Your fingerprint"}
+          </h1>
           <div className="flex items-center gap-2 mt-1">
             <ConfidencePill confidence={confidence} />
             <span className="text-slate-500 text-xs">{sessionCount} session{sessionCount !== 1 ? "s" : ""}</span>
@@ -290,6 +293,12 @@ export default function Grow() {
                 </div>
               </Section>
             )}
+
+            {/* Save your progress — value delivered, now the soft commitment
+                moment (no login wall, no account; spec §7). */}
+            {!name && (
+              <SaveProgress userId={currentUserId() ?? 0} onSaved={setName} />
+            )}
           </>
         )}
       </div>
@@ -367,6 +376,83 @@ function LoadingState() {
     <div className="flex-1 flex flex-col items-center justify-center min-h-dvh gap-4 bg-ink-900">
       <div className="w-10 h-10 rounded-full border-2 border-neural/40 border-t-neural animate-spin" />
       <p className="text-slate-400 text-sm">Loading your fingerprint…</p>
+    </div>
+  );
+}
+
+/** The soft save moment: name yourself + copy your CogPrint ID to return on
+    another device. Client-side only; dismissible; shown once per session. */
+function SaveProgress({ userId, onSaved }: { userId: number; onSaved: (n: string) => void }) {
+  const [draft, setDraft] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [hidden, setHidden] = useState(
+    () => sessionStorage.getItem("cog_save_dismissed") === "1"
+  );
+
+  if (hidden) return null;
+
+  function save() {
+    const n = draft.trim();
+    if (!n) return;
+    setState({ name: n });
+    onSaved(n);
+  }
+
+  async function copyId() {
+    try {
+      await navigator.clipboard.writeText(String(userId));
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard unavailable — the ID is still visible to copy manually.
+    }
+  }
+
+  return (
+    <div className="rounded-2xl bg-ink-700 neural-border p-4 animate-fade-up">
+      <div className="flex items-start justify-between">
+        <p className="text-white font-semibold text-sm">Save your progress</p>
+        <button
+          onClick={() => { sessionStorage.setItem("cog_save_dismissed", "1"); setHidden(true); }}
+          className="text-slate-600 text-xs hover:text-slate-400 px-1"
+          aria-label="Dismiss"
+        >
+          ✕
+        </button>
+      </div>
+      <p className="text-slate-400 text-xs mt-1">
+        Your fingerprint lives on this device. Give yourself a name, and keep
+        your CogPrint ID to pick up where you left off anywhere.
+      </p>
+
+      <div className="flex gap-2 mt-3">
+        <input
+          type="text"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && save()}
+          placeholder="Your name"
+          className="flex-1 bg-ink-800 neural-border rounded-xl px-3 py-2 text-sm text-slate-200
+                     placeholder-slate-600 focus:outline-none focus:border-neural/50"
+        />
+        <button
+          onClick={save}
+          disabled={!draft.trim()}
+          className="px-4 py-2 rounded-xl bg-neural text-ink-900 text-sm font-bold
+                     disabled:opacity-30 hover:bg-neural-glow active:scale-[0.97] transition-all"
+        >
+          Save
+        </button>
+      </div>
+
+      <div className="flex items-center justify-between mt-3 pt-3 border-t border-ink-500/40">
+        <p className="text-slate-500 text-xs">
+          Your CogPrint ID: <span className="text-neural font-mono font-semibold">#{userId}</span>
+        </p>
+        <button onClick={copyId} className="text-neural text-xs font-medium">
+          {copied ? "Copied ✓" : "Copy ID"}
+        </button>
+      </div>
     </div>
   );
 }
