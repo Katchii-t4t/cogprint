@@ -325,6 +325,7 @@ cd frontend && npx tsc --noEmit
 | 2026-07-04 | Bot B (sgkar, overnight) | Ideal-product polish on `app/`: generative FingerprintArt centrepiece; **sham made visually indistinguishable** (verified in browser vs real); question pre-gen on analyze; recents strip; forgetting-nudge (dismissible, ~6h). Build+PWA green. | ✅ done |
 | 2026-07-05 | Bot B (sgkar) | Added `Study.tsx` (missing Focus-mode screen) + fullscreen timer; fixed 3 real eslint react-hooks bugs (1 mine, 2 pre-existing); found+fixed stale `cogprint.db` schema bug (no migrations — delete db to pick up new columns); wired `ANTHROPIC_API_KEY` into `cogprint/.env`, verified real flashcard generation live (Claude Opus 4.8, incl. Norwegian content). | ✅ done |
 | 2026-07-05 | Bot B (sgkar) | **Quiz mode built + verified**: objectively-graded MC (answer + 3 distractors, deterministic grading) is the default and the only mode that logs sessions; flashcards demoted to unscored practice. Backend `Flashcard.distractors` (backward-compatible), prompt update, 2 new tests (26/26 green). Browser-verified: quiz round → 1 session, flashcard round → 0, practice banner OK. Bonus: fixed pre-existing stale-state bug that dropped the last card's answer from every score. Spec/design record: `QUIZ_MODE_BUILD.md`. | ✅ done |
+| 2026-07-05 | Bot B (sgkar) | **Final sync before owner leaves (~1 month, abroad).** Appendix A snapshot brought fully current (34 commits, quiz mode, consumer app, 4 features, .env locality warning, run-from-scratch incl. `app/`); README got a cold-start map. Repo is the complete handover — any session can resume from GitHub alone. | ✅ done |
 | 2026-07-05 | Bot B (sgkar, overnight) | **All 4 NEXT_FEATURES built + verified**, one commit each: F1 shareable fingerprint PNG (`lib/fingerprint.ts` + `lib/shareCard.ts`, Web Share + download, real 1104 KB PNG verified); F3 forgetting nudges (`personalization/review.py` + `GET /users/{id}/review-suggestions`, names the fading material, blinding-safe); F4 save progress (client-side name + restore-by-CogPrint-ID, browser-verified restore); F2 photo→OCR (`agents/material_ocr.py` + `POST /materials/ocr`, real vision transcription verified verbatim). Backend 34/34 tests; eslint + build green throughout. | ✅ done |
 | 2026-06-18 | Bot A (Karthik's PC) | **Consumer app built (`app/`) — all 4 screens + retention checks, verified end-to-end against the live backend.** See "Bot A — consumer app" below. | ✅ done |
 
@@ -428,7 +429,15 @@ nudges — not started; confirm scope first.
 
 # Appendix A — Complete State Snapshot (detailed, plain-language)
 
-> A full backup of context as of commit `4cf43e1` (17 commits). If you are picking
+> ⚠️ **OWNER AWAY until ~August 2026** (abroad for the summer; this snapshot was
+> finalised 2026-07-05 on the stationary PC, commit `d6fbdf8`, 34 commits). Any session
+> picking this up cold: GitHub is the single source of truth — everything important is
+> pushed. Two machine-local things do NOT transfer: (1) `cogprint/.env` holds the
+> owner's ANTHROPIC_API_KEY on the stationary PC only — on any other machine, flashcard
+> generation and photo-OCR return a clean 503 until the owner adds a key there; the rest
+> of the app is fully functional without it. (2) `cogprint.db` is per-machine test data.
+>
+> A full backup of context as of commit `d6fbdf8` (34 commits). If you are picking
 > this up cold — or recovering after losing a session — this section alone should let
 > you rebuild the whole mental model. Everything here is also true in the code; when
 > the two disagree, the code wins and you should fix this doc.
@@ -451,7 +460,9 @@ public marketing site is a *separate* repo (`cogprint-site`).
   `C:\Users\sgkar\.claude\sessions\Proj Ciel\cogprint`.
 - **Local-only, NOT on GitHub (all regenerable — safe to lose):** `cogprint.db` (SQLite
   data), `__pycache__/`, `.pytest_cache/`, `frontend/node_modules/`, `frontend/dist/`,
-  and `.env` (does not exist yet — see A.7). `.gitignore` keeps these out on purpose.
+  and `.env` (EXISTS on the stationary PC only, holding the owner's ANTHROPIC_API_KEY —
+  correctly gitignored, so it will NOT be on any other machine; see A.7).
+  `.gitignore` keeps these out on purpose.
 - **Node.js:** not system-installed here; a **portable** copy lives at
   `%LOCALAPPDATA%\node-portable\node-v24.16.0-win-x64`. Put it on PATH to run `npm`.
 - **Python:** Anaconda (`python`, `uvicorn`, `pytest`, `numpy`, `Pillow`, `anthropic`
@@ -486,10 +497,22 @@ Researcher). `src/types.ts` mirrors backend schemas — reuse it. Builds clean; 
 **Browser extension (`extension/`):** MV3, vanilla JS, one-click session logging. Load
 unpacked from `chrome://extensions`.
 
-**Docs:** `README.md`, `HANDOVER.md` (this file), `CONSUMER_APP_BUILD.md` (the consumer
-app plan + API contract), `RETENTION_SCHEDULE_DECISION.md` (the open scientific choice).
+**Consumer app (`app/`)** — the product-track study app (dark neural theme, mobile-first,
+PWA). Pages: `Paste` (landing: paste text, photo→OCR, recents, forgetting-nudge,
+restore-by-ID), `Plan` (14-day plan + rationale), `Study` (distraction-free focus mode +
+full-screen timer + quiet corner tab), `Cards` (QUIZ mode default — objectively-graded
+multiple-choice, the only mode that logs sessions; flashcards = unscored practice),
+`Grow` (the living generative fingerprint + insights-as-actions + share-PNG +
+save-progress), `Checks` (24h/7d retention). Key libs: `src/lib/fingerprint.ts`
+(generative geometry), `src/lib/shareCard.ts` (share-card PNG), `src/insights.ts`
+(**real/sham split** — visually indistinguishable, RCT-critical).
 
-## A.4 Everything done so far (the 17 commits, grouped)
+**Docs:** `README.md`, `HANDOVER.md` (this file), `CONSUMER_APP_BUILD.md` (consumer-app
+vision + API contract + build status), `QUIZ_MODE_BUILD.md` + `NEXT_FEATURES_BUILD.md`
+(design records of shipped features), `RETENTION_SCHEDULE_DECISION.md` (the open
+scientific choice), `app/README.md`.
+
+## A.4 Everything done so far (34 commits, grouped)
 
 1. **Docs bootstrap** — README + HANDOVER so two machines can collaborate.
 2. **Backend hardening (Bot B pass 1):** env-configurable CORS; fingerprint rebuild moved
@@ -505,6 +528,20 @@ app plan + API contract), `RETENTION_SCHEDULE_DECISION.md` (the open scientific 
    503 without a key) + `CONSUMER_APP_BUILD.md` (vision, 4-screen plan, API contract,
    real/sham architecture) + **Step A backend** (bad-question flag, stable card ids,
    flagged-card exclusion).
+6. **Consumer app MVP (Bot A)** — all screens in `app/` (dark neural UI) + focus timer +
+   PWA; then **Bot B ideal-product pass**: living generative FingerprintArt, sham made
+   visually indistinguishable (verified in browser), question pre-generation, recents,
+   nudges, the missing Study/Focus screen, eslint-clean.
+7. **Quiz mode** (`QUIZ_MODE_BUILD.md`): objectively-graded multiple-choice (answer + 3
+   LLM-generated distractors, deterministic string-equality grading) is the default and
+   the ONLY mode that logs sessions/feeds the fingerprint; flashcards demoted to
+   explicitly-unscored practice. Also fixed a pre-existing stale-state bug that dropped
+   the last card's answer from every score.
+8. **Four features** (`NEXT_FEATURES_BUILD.md`, one commit each): F1 shareable
+   fingerprint PNG (Web Share + download); F3 per-topic forgetting nudges
+   (`GET /users/{id}/review-suggestions`, deterministic Ebbinghaus, blinding-safe);
+   F4 save-progress (client-side name + restore-by-CogPrint-ID); F2 photo→OCR
+   (`agents/material_ocr.py` + `POST /materials/ocr`, Claude vision, verified verbatim).
 
 ## A.5 How the system works (data flow)
 
@@ -523,12 +560,15 @@ full personalised pipeline. Confidence: <5 sessions = low, 5–15 = medium, 16+ 
 
 ## A.6 What works right now vs what's not built
 
-**Works (verified):** the whole backend (24 tests green), the research frontend (builds +
-runs + PWA), the extension, Agent 4 generation + the flag mechanism (mocked in tests; live
-needs a key). **Not built:** the consumer app's 4 screens, the `InsightProvider` real/sham
-frontend split, the dark redesign, the flashcard-round → session/retention frontend wiring
-(Step A's frontend half). All of that is reduced to *frontend* work against a now-complete,
-stable API contract (see `CONSUMER_APP_BUILD.md` §4).
+**Works (all verified live in browser or via real API calls):** the whole backend
+(**34 tests green**); the research frontend (`frontend/`, builds + PWA); the browser
+extension; and the complete consumer app (`app/`): paste→plan→study→quiz→fingerprint
+loop, quiz mode with real Opus-generated distractors, retention checks, forgetting
+nudges naming the fading material, share-card PNG (real 1104 KB render), save/restore
+by CogPrint ID, photo→OCR (real vision transcription). **Not built:** deploy (needs the
+owner's hosting choice), retention reminders/notifications, per-participant auth tokens,
+Postgres/Alembic, the Phase-5 sham engine backend, adaptive quiz difficulty, and the
+spec's later "living dashboard" layer (sleep/stress/streaks/premium).
 
 ## A.7 Security model (read before touching the LLM)
 
@@ -536,8 +576,12 @@ stable API contract (see `CONSUMER_APP_BUILD.md` §4).
   puts `ANTHROPIC_API_KEY=sk-ant-...` in a local `.env` themselves. `.env` is gitignored.
 - Without a key, `POST /materials/{id}/questions` returns **503** and everything else (all
   API-free) works normally — the UI should show a clean "needs setup" state, not crash.
-- `COGPRINT_QGEN_MODEL` (default `claude-opus-4-8`) is the cost lever — switch to a cheaper
-  model to save money. Question sets are cached per material; don't regenerate needlessly.
+- `COGPRINT_QGEN_MODEL` and `COGPRINT_OCR_MODEL` (both default `claude-opus-4-8`) are the
+  cost levers — switch to a cheaper model to save money. Question sets are cached per
+  material; OCR photos are downscaled client-side; don't regenerate needlessly.
+- There are exactly TWO LLM service modules — `agents/question_generator.py` and
+  `agents/material_ocr.py` — and both only produce *content* (questions, transcription).
+  Everything numeric stays in deterministic NumPy. Keep it that way.
 - `COGPRINT_API_KEY` (separate thing) gates the bulk-data researcher endpoints. Off by
   default (fine for local/closed pilot); set it before any public deploy.
 
@@ -558,24 +602,41 @@ git clone https://github.com/Katchii-t4t/cogprint.git && cd cogprint
 
 # 2. Backend
 pip install -r requirements.txt
-python -m pytest                 # expect 24 passing
+python -m pytest                 # expect 34 passing
 uvicorn main:app --reload        # http://localhost:8000/docs
+# NOTE: no --reload means code changes need a manual restart — this bit us
+# twice (stale endpoints/schema in the running process). Use --reload in dev.
 
-# 3. Frontend (Node on PATH — portable copy at %LOCALAPPDATA%\node-portable\...)
-cd frontend && npm install && npm run dev   # http://localhost:5173
+# 3. CONSUMER APP (the product — Node on PATH; portable copy on the stationary
+#    PC at %LOCALAPPDATA%\node-portable\node-v24.16.0-win-x64)
+cd app && npm install && npm run dev        # http://localhost:5173 (use localhost,
+                                            # not 127.0.0.1 — vite binds IPv6 here)
 
-# 4. (optional) enable flashcards: create cogprint/.env with ANTHROPIC_API_KEY=...
+# 4. Research platform (separate frontend, light theme)
+cd frontend && npm install && npm run dev
+
+# 5. (optional) enable flashcards + photo-OCR: create cogprint/.env with
+#    ANTHROPIC_API_KEY=...   (owner does this; never commit it)
+
+# 6. If the backend 500s with "table X has no column Y": the gitignored dev
+#    cogprint.db predates a schema change — delete it; create_all rebuilds it.
 ```
-Sanity before pushing: `python -m py_compile main.py config.py auth.py database.py
-schemas/*.py personalization/*.py agents/*.py` and `cd frontend && npx tsc --noEmit`.
+Sanity before pushing: `python -m pytest`, and in `app/`: `npm run build` **and**
+`npx eslint src` (the react-hooks purity lint is strict — see the `now()` helper
+pattern in `Cards.tsx`).
 
 ## A.10 What's next
 
-Frontend build of the consumer app, in order: **Step A frontend wiring** → **Screen 1**
-(paste→analyze) → **Screen 2** (study plan + why + timer) → **Screen 3** (flashcard swipe
-loop, using Agent 4 + the flag endpoint) → **Screen 4** (growing fingerprint) → **dark
-redesign**. Build each end-to-end before the next. Confirm scope with the owner before
-anything beyond these screens. Full detail: `CONSUMER_APP_BUILD.md`.
+The consumer app is feature-complete against the ideal-product spec's MVP + the four
+follow-on features. Remaining, roughly in order of value:
+1. **Deploy** (static host for `app/` with `VITE_API_BASE`; backend host with
+   `CORS_ORIGINS` + `COGPRINT_API_KEY`) — needs the owner's hosting choice, don't pick
+   one unilaterally.
+2. **Resolve the retention schedule** (`RETENTION_SCHEDULE_DECISION.md`) — scientific
+   call for the owner + UiO advisor; everything else in the protocol waits on it.
+3. Retention reminders/notifications; per-participant auth; Postgres + Alembic.
+4. Phase-5 sham engine backend; adaptive quiz difficulty; the "living dashboard" layer.
+Confirm scope with the owner before anything beyond these.
 
 ---
 

@@ -8,11 +8,23 @@ This repo is the **backend + research-platform frontend** for CogPrint, a youth-
 international study on how individuals learn best. The public **marketing website** is a
 separate repo: [`cogprint-site`](https://github.com/Katchii-t4t/cogprint-site).
 
-📄 **Read [`HANDOVER.md`](./HANDOVER.md) for the full technical state, architecture deep-dive,
-what's done / pending / broken, and the two-machine collaboration workflow.**
-
-🚀 **Building the consumer app?** Start with [`CONSUMER_APP_BUILD.md`](./CONSUMER_APP_BUILD.md) —
-the vision, the 4-screen MVP plan, the API contract, and the real/sham architecture.
+> ### 🧭 START HERE (cold-start map — owner away until ~Aug 2026)
+> Everything important is in this repo; GitHub is the single source of truth.
+> 1. **[`HANDOVER.md`](./HANDOVER.md)** — full technical state + two-machine workflow.
+>    **Appendix A** is the complete plain-language snapshot: read that alone and you
+>    have the whole mental model, including how to run everything from scratch.
+> 2. **[`CONSUMER_APP_BUILD.md`](./CONSUMER_APP_BUILD.md)** — the product vision, the
+>    frontend↔backend API contract, and the build-status box (what's shipped).
+> 3. Design records of shipped work: [`QUIZ_MODE_BUILD.md`](./QUIZ_MODE_BUILD.md),
+>    [`NEXT_FEATURES_BUILD.md`](./NEXT_FEATURES_BUILD.md).
+> 4. The open scientific decision: [`RETENTION_SCHEDULE_DECISION.md`](./RETENTION_SCHEDULE_DECISION.md).
+>
+> **State in one line:** backend complete (34 tests green); consumer app (`app/`)
+> feature-complete vs the ideal-product spec (quiz mode, fingerprint art, share-PNG,
+> OCR, nudges, save/restore); research platform (`frontend/`) + browser extension live;
+> **remaining: deploy + the retention-schedule decision.** The Anthropic API key lives
+> only in the stationary PC's gitignored `.env` — other machines get a graceful 503 on
+> flashcards/OCR until a key is added.
 
 ---
 
