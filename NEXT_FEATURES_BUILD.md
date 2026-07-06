@@ -1,6 +1,12 @@
 # CogPrint — Next Features Build Spec (4 features)
 
-**Status:** ⏳ PLANNED, not built. Designed 2026-07-05.
+**Status:** ✅ **ALL 4 BUILT & VERIFIED** (2026-07-05, Bot B, overnight). Each feature
+shipped as its own commit (F1 `1fa1f8b`, F3 `a170e59`, F4 `8f521a6`, F2 `6173476`), all
+acceptance criteria met: 34/34 backend tests, eslint + build clean, and browser/API
+verified — F1 rendered a real 1104 KB PNG share card; F3 surfaced a backdated material
+by name ("You're about to forget 'The water cycle…'"); F4 restored a cleared device by
+CogPrint ID and personalised the header; F2 transcribed a real test image verbatim via
+Claude vision. This document is kept as the design record.
 **Read order:** `CONSUMER_APP_BUILD.md` (vision + state + API contract) → this file →
 `HANDOVER.md` (backend) → the code.
 

@@ -11,10 +11,12 @@ dark redesign is already done. See the build-status box below and `app/README.md
 ✅ **Quiz mode built** ([`QUIZ_MODE_BUILD.md`](./QUIZ_MODE_BUILD.md)) — objectively-graded
 multiple-choice is the primary/default study round; flashcards demoted to unscored practice.
 
-⏳ **Next planned features:** [`NEXT_FEATURES_BUILD.md`](./NEXT_FEATURES_BUILD.md) — four
-independent, ready-to-build features: (1) shareable fingerprint PNG (the growth engine),
-(2) photo→OCR material input (Claude vision), (3) smart per-topic forgetting nudges
-(Ebbinghaus-based), (4) "save your progress" name + restore-by-ID. Designed 2026-07-05.
+✅ **All four next features built** ([`NEXT_FEATURES_BUILD.md`](./NEXT_FEATURES_BUILD.md)):
+(1) shareable fingerprint PNG (Web Share + download — the growth engine), (2) photo→OCR
+material input (Claude vision, isolated, graceful 503), (3) smart per-topic forgetting
+nudges ("You're about to forget 'X'" — deterministic Ebbinghaus, blinding-safe),
+(4) "save your progress" name + restore-by-CogPrint-ID. All browser/API verified
+2026-07-05. **Remaining: deploy.**
 
 > ### Build status (2026-06-18)
 > - ✅ **Screen 1 Paste** (`app/src/pages/Paste.tsx`) — analyse + anonymous user.
