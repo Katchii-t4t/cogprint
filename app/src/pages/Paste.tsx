@@ -6,7 +6,25 @@ import {
   type RecentMaterial,
 } from "../store";
 
-type Phase = "idle" | "reading" | "done";
+type Phase = "idle" | "reading" | "ocr" | "done";
+
+/** Downscale a photo client-side (longest edge ~1600px, JPEG 0.85) to bound
+    upload size and vision cost, then base64-encode it. */
+async function imageFileToBase64Jpeg(file: File): Promise<{ b64: string; media: string }> {
+  const bitmap = await createImageBitmap(file);
+  const maxEdge = 1600;
+  const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
+  const w = Math.max(1, Math.round(bitmap.width * scale));
+  const h = Math.max(1, Math.round(bitmap.height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("canvas unavailable");
+  ctx.drawImage(bitmap, 0, 0, w, h);
+  const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+  return { b64: dataUrl.slice(dataUrl.indexOf(",") + 1), media: "image/jpeg" };
+}
 
 export default function Paste() {
   const [text, setText] = useState("");
@@ -24,6 +42,26 @@ export default function Paste() {
   const [restoreErr, setRestoreErr] = useState("");
   const navigate = useNavigate();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+
+  async function handlePhoto(file: File) {
+    setError("");
+    setPhase("ocr");
+    try {
+      const { b64, media } = await imageFileToBase64Jpeg(file);
+      const r = await api.ocr(b64, media);
+      setText(r.text);
+      setPhase("idle"); // land the text in the textarea so the user can glance/edit
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "";
+      setError(
+        msg.startsWith("503")
+          ? "Photo scanning needs setup — the AI key isn't configured on this server yet. You can still paste text."
+          : "Couldn't read that photo. Try a clearer shot, or paste the text instead."
+      );
+      setPhase("idle");
+    }
+  }
 
   async function handleRestore() {
     const id = parseInt(restoreId, 10);
@@ -191,6 +229,27 @@ export default function Paste() {
             Analyse →
           </button>
 
+          {/* Photo -> OCR: snap notes or a textbook page instead of typing */}
+          <input
+            ref={photoInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              e.target.value = ""; // allow re-picking the same file
+              if (f) handlePhoto(f);
+            }}
+          />
+          <button
+            onClick={() => photoInputRef.current?.click()}
+            className="w-full py-3 rounded-2xl bg-ink-700 neural-border text-slate-300 text-sm
+                       font-medium hover:bg-ink-600 active:scale-[0.98] transition-all"
+          >
+            📷 Snap a photo of your notes
+          </button>
+
           <p className="text-center text-slate-600 text-xs">
             ⌘ + Enter to submit · Your data stays private
           </p>
@@ -265,6 +324,18 @@ export default function Paste() {
             <p className="text-neural font-medium">Reading your material…</p>
             <p className="text-slate-500 text-sm mt-1">
               Mapping concepts and building your plan
+            </p>
+          </div>
+        </div>
+      )}
+
+      {phase === "ocr" && (
+        <div className="flex-1 flex flex-col items-center justify-center gap-8 animate-fade-in">
+          <ReadingAnimation />
+          <div className="text-center">
+            <p className="text-neural font-medium">Reading your photo…</p>
+            <p className="text-slate-500 text-sm mt-1">
+              Transcribing the text so you can review it
             </p>
           </div>
         </div>

@@ -31,6 +31,8 @@ from schemas.session import (
     FingerprintResponse,
     MaterialAnalysisResponse,
     MaterialCreate,
+    OcrRequest,
+    OcrResponse,
     PostTestUpdate,
     RetentionCheckCreate,
     RetentionCheckResponse,
@@ -286,6 +288,45 @@ def analyze_material(body: MaterialCreate, db: Session = Depends(get_db)):
     db.commit()
 
     return MaterialAnalysisResponse(material_id=material.id, knowledge_map=knowledge_map)
+
+
+# ---------------------------------------------------------------------------
+# Material OCR — photo of notes/textbook -> text (LLM vision, isolated)
+# ---------------------------------------------------------------------------
+
+# ~5 MB of decoded image; base64 inflates by 4/3. Module-level so tests can
+# monkeypatch it instead of constructing a multi-MB payload.
+MAX_OCR_B64_CHARS = 7_000_000
+
+
+@app.post("/materials/ocr", response_model=OcrResponse)
+def ocr_material(body: OcrRequest):
+    """Transcribe a photo of study material into text.
+
+    Pure text acquisition: does NOT create a Material — the frontend feeds the
+    returned text into POST /materials/analyze, reusing the whole downstream
+    pipeline unchanged. 503 (not 500) when the LLM isn't configured.
+    """
+    from agents.material_ocr import (
+        ALLOWED_MEDIA_TYPES,
+        OcrUnavailable,
+        extract_text_from_image,
+    )
+
+    if body.media_type not in ALLOWED_MEDIA_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"media_type must be one of {sorted(ALLOWED_MEDIA_TYPES)}",
+        )
+    if len(body.image_base64) > MAX_OCR_B64_CHARS:
+        raise HTTPException(status_code=413, detail="Image too large (max ~5 MB).")
+
+    try:
+        text = extract_text_from_image(body.image_base64, body.media_type)
+    except OcrUnavailable as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+    return OcrResponse(text=text)
 
 
 # ---------------------------------------------------------------------------

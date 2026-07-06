@@ -45,6 +45,17 @@ class MaterialCreate(BaseModel):
     raw_text: str
 
 
+class OcrRequest(BaseModel):
+    """A photo of notes/textbook to transcribe (base64, no data-URL prefix)."""
+
+    image_base64: str
+    media_type: str  # one of agents.material_ocr.ALLOWED_MEDIA_TYPES
+
+
+class OcrResponse(BaseModel):
+    text: str
+
+
 class PostTestUpdate(BaseModel):
     post_test_score: float = Field(ge=0.0, le=1.0)
 

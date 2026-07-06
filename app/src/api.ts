@@ -95,5 +95,12 @@ export const api = {
   getReviewSuggestions: (userId: number) =>
     req<ReviewSuggestion[]>(`/users/${userId}/review-suggestions`),
 
+  // Photo of notes/textbook -> transcribed text (fed into analyzeMaterial).
+  ocr: (imageBase64: string, mediaType: string) =>
+    req<{ text: string }>("/materials/ocr", {
+      method: "POST",
+      body: JSON.stringify({ image_base64: imageBase64, media_type: mediaType }),
+    }),
+
   getUser: (userId: number) => req<User>(`/users/${userId}`),
 };
