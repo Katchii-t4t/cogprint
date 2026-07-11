@@ -1,8 +1,17 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api";
-import { currentUserId, getState } from "../store";
+import { currentUserId, getState, setState } from "../store";
 import { buildView, label, type InsightView } from "../insights";
+import {
+  buildForecast,
+  archetype,
+  WEATHER_META,
+  type MemoryForecast,
+  type Archetype,
+} from "../forecast";
+import { getStreak, type StreakInfo } from "../streak";
+import type { FingerprintProfile, PendingCheckItem, BuddyForecast } from "../types";
 
 const EFFECTIVENESS_COLORS: Record<string, string> = {
   best: "bg-neural",
@@ -17,7 +26,10 @@ export default function Grow() {
   const navigate = useNavigate();
 
   const [view, setView] = useState<InsightView | null>(null);
-  const [pending, setPending] = useState(0);
+  const [pendingList, setPendingList] = useState<PendingCheckItem[]>([]);
+  const [forecast, setForecast] = useState<MemoryForecast | null>(null);
+  const [arch, setArch] = useState<Archetype | null>(null);
+  const [streak, setStreak] = useState<StreakInfo | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -25,6 +37,10 @@ export default function Grow() {
     if (!userId) { navigate("/"); return; }
 
     const { group } = getState();
+    const isTreatment = (group ?? "treatment") === "treatment";
+
+    // Streak is behavioural (local, not fingerprint-derived) — safe for both groups.
+    setStreak(getStreak());
 
     Promise.all([
       api.getFingerprint(userId),
@@ -32,7 +48,15 @@ export default function Grow() {
     ])
       .then(([fingerprint, checks]) => {
         setView(buildView(fingerprint.fingerprint, group ?? "treatment"));
-        setPending(checks.length);
+        setPendingList(checks);
+        // Personalised surfaces (#1 forecast, #2 archetype) are treatment-only,
+        // preserving the RCT blind. Control users still get the sham insights +
+        // the streak so the screen never looks empty.
+        if (isTreatment) {
+          const fp: FingerprintProfile = fingerprint.fingerprint;
+          setForecast(buildForecast(fp, checks.length));
+          setArch(archetype(fp));
+        }
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -43,6 +67,7 @@ export default function Grow() {
   const v = view;
   const sessionCount = v?.sessionCount ?? 0;
   const confidence = v?.confidence ?? "low";
+  const pending = pendingList.length;
 
   return (
     <div className="flex flex-col min-h-dvh bg-ink-900 max-w-lg mx-auto w-full">
@@ -77,31 +102,35 @@ export default function Grow() {
           </div>
         )}
 
-        {/* Pending checks */}
-        {pending > 0 && (
-          <div
-            className="rounded-2xl bg-amber-950/20 border border-amber-500/30 p-4 mb-4 cursor-pointer"
-            onClick={() => navigate("/checks")}
-          >
-            <p className="text-amber-300 font-medium text-sm">
-              ⏰ {pending} retention check{pending > 1 ? "s" : ""} due
-            </p>
-            <p className="text-amber-400/60 text-xs mt-0.5">
-              Complete them to improve your fingerprint accuracy
-            </p>
-          </div>
-        )}
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 pb-24 space-y-6">
         {/* Fingerprint header */}
         <div className="animate-fade-up">
           <h1 className="text-2xl font-bold text-white">Your fingerprint</h1>
-          <div className="flex items-center gap-2 mt-1">
+          <div className="flex items-center gap-2 mt-1 flex-wrap">
             <ConfidencePill confidence={confidence} />
             <span className="text-slate-500 text-xs">{sessionCount} session{sessionCount !== 1 ? "s" : ""}</span>
+            {arch && <ArchetypeBadge archetype={arch} />}
           </div>
         </div>
+
+        {/* #4 Retention streak — behavioural, shown to everyone */}
+        {streak && streak.current > 0 && <StreakBadge streak={streak} />}
+
+        {/* #1 Memory weather forecast (treatment only) */}
+        {forecast && forecast.weather !== "unknown" && (
+          <ForecastCard forecast={forecast} onReview={() => navigate("/checks")} />
+        )}
+
+        {/* #5 Boss battles — due retention checks reframed */}
+        {pending > 0 && (
+          <BossSection
+            checks={pendingList}
+            weakestTechnique={weakestTechnique(v)}
+            onFight={() => navigate("/checks")}
+          />
+        )}
 
         {/* Low confidence — growing state */}
         {confidence === "low" && (
@@ -223,6 +252,9 @@ export default function Grow() {
             )}
           </>
         )}
+
+        {/* #9 study-buddy accountability */}
+        <BuddyCard />
       </div>
 
       {/* Bottom CTA */}
@@ -318,5 +350,276 @@ function LoadingState() {
       <div className="w-10 h-10 rounded-full border-2 border-neural/40 border-t-neural animate-spin" />
       <p className="text-slate-400 text-sm">Loading your fingerprint…</p>
     </div>
+  );
+}
+
+// --- #2 archetype badge -----------------------------------------------------
+function ArchetypeBadge({ archetype }: { archetype: Archetype }) {
+  return (
+    <span
+      className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-neural/10 text-neural
+                 border border-neural/20 uppercase tracking-widest"
+      title={`${archetype.blurb} (based on your data so far)`}
+    >
+      {archetype.emoji} {archetype.name}
+    </span>
+  );
+}
+
+// --- #4 streak badge --------------------------------------------------------
+function StreakBadge({ streak }: { streak: StreakInfo }) {
+  return (
+    <div className="rounded-2xl bg-ink-700 neural-border p-4 flex items-center gap-3 animate-fade-up">
+      <span className="text-3xl">{streak.keptToday ? "🔥" : "🌙"}</span>
+      <div className="flex-1">
+        <p className="text-white font-bold">
+          {streak.current} day{streak.current !== 1 ? "s" : ""} memory streak
+        </p>
+        <p className="text-slate-400 text-xs mt-0.5">
+          {streak.keptToday
+            ? "You kept your memory strong today. Keep it alive!"
+            : "Study or run a check today to keep the streak alive."}
+        </p>
+      </div>
+      {streak.longest > streak.current && (
+        <span className="text-slate-500 text-[10px] text-right">
+          best<br />
+          <span className="text-slate-300 font-semibold">{streak.longest}d</span>
+        </span>
+      )}
+    </div>
+  );
+}
+
+// --- #1 memory weather forecast --------------------------------------------
+function ForecastCard({
+  forecast,
+  onReview,
+}: {
+  forecast: MemoryForecast;
+  onReview: () => void;
+}) {
+  const meta = WEATHER_META[forecast.weather];
+  return (
+    <div className="rounded-2xl bg-ink-700 neural-border p-4 animate-fade-up">
+      <div className="flex items-center gap-3">
+        <span className="text-3xl">{meta.icon}</span>
+        <div className="flex-1">
+          <p className={`font-bold ${meta.tint}`}>Memory forecast · {meta.label}</p>
+          <p className="text-slate-400 text-xs mt-0.5 leading-relaxed">
+            {forecast.summary}
+          </p>
+        </div>
+      </div>
+      <div className="flex gap-2 mt-3">
+        <ForecastChip n={forecast.fading} label="fading" tint="text-rose-300" />
+        <ForecastChip n={forecast.cooling} label="cooling" tint="text-amber-300" />
+        <ForecastChip n={forecast.solid} label="solid" tint="text-neural" />
+      </div>
+      {(forecast.weather === "stormy" || forecast.pendingChecks > 0) && (
+        <button
+          onClick={onReview}
+          className="w-full mt-3 py-2.5 rounded-xl bg-neural/10 border border-neural/20 text-neural
+                     text-sm font-medium hover:bg-neural/20 active:scale-[0.98] transition-all"
+        >
+          Clear the skies — review now →
+        </button>
+      )}
+    </div>
+  );
+}
+
+function ForecastChip({ n, label, tint }: { n: number; label: string; tint: string }) {
+  return (
+    <div className="flex-1 rounded-xl bg-ink-800 border border-ink-500/40 py-2 text-center">
+      <p className={`font-bold ${tint}`}>{n}</p>
+      <p className="text-slate-500 text-[10px] uppercase tracking-wider">{label}</p>
+    </div>
+  );
+}
+
+// --- #5 boss battles --------------------------------------------------------
+function weakestTechnique(v: InsightView | null): string | null {
+  if (!v || v.retentionRows.length === 0) return null;
+  const weakest = [...v.retentionRows].sort(
+    (a, b) => a.predicted7d - b.predicted7d
+  )[0];
+  return weakest ? weakest.technique : null;
+}
+
+function BossSection({
+  checks,
+  weakestTechnique,
+  onFight,
+}: {
+  checks: PendingCheckItem[];
+  weakestTechnique: string | null;
+  onFight: () => void;
+}) {
+  return (
+    <Section title="Memory bosses">
+      <div className="space-y-3">
+        {weakestTechnique && (
+          <div className="rounded-2xl bg-rose-950/20 border border-rose-500/30 p-4">
+            <p className="text-rose-300 font-semibold text-sm">
+              👹 Final boss: {label(weakestTechnique)}
+            </p>
+            <p className="text-rose-400/60 text-xs mt-0.5">
+              Your weakest-decay technique. Beat its checks to level it up.
+            </p>
+          </div>
+        )}
+        {checks.map((c, i) => {
+          const overdueDays = Math.max(
+            0,
+            Math.round((Date.now() - new Date(c.due_date).getTime()) / 86_400_000)
+          );
+          const hp = Math.min(100, 40 + overdueDays * 20);
+          return (
+            <div
+              key={`${c.session_id}-${c.check_type}`}
+              className="rounded-2xl bg-ink-700 neural-border p-4"
+              style={{ animationDelay: `${i * 60}ms` }}
+            >
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-slate-200 text-sm font-medium">
+                  ⚔️ {c.check_type} check
+                </span>
+                <span className="text-slate-500 text-[10px]">
+                  {overdueDays > 0 ? `overdue ${overdueDays}d` : "ready"}
+                </span>
+              </div>
+              <div className="h-1.5 bg-ink-500 rounded-full overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-rose-500/70 transition-all duration-700"
+                  style={{ width: `${hp}%` }}
+                />
+              </div>
+            </div>
+          );
+        })}
+        <button
+          onClick={onFight}
+          className="w-full py-3 rounded-xl bg-neural text-ink-900 font-semibold
+                     hover:bg-neural-glow active:scale-[0.98] transition-all"
+        >
+          Fight bosses →
+        </button>
+      </div>
+    </Section>
+  );
+}
+
+// --- #9 study-buddy accountability -----------------------------------------
+function BuddyCard() {
+  const [myCode, setMyCode] = useState<string | null>(null);
+  const [input, setInput] = useState("");
+  const [buddyCode, setBuddyCode] = useState<string | null>(getState().buddyCode);
+  const [buddy, setBuddy] = useState<BuddyForecast | null>(null);
+  const [err, setErr] = useState("");
+
+  // Fetch (or lazily create) my own share code once.
+  useEffect(() => {
+    const userId = currentUserId();
+    if (!userId) return;
+    api.getShareCode(userId).then((r) => setMyCode(r.share_code)).catch(() => {});
+  }, []);
+
+  // Whenever we're following a buddy, load their forecast.
+  useEffect(() => {
+    if (!buddyCode) { setBuddy(null); return; }
+    api
+      .getBuddyForecast(buddyCode)
+      .then(setBuddy)
+      .catch(() => setErr("Couldn't find a buddy with that code."));
+  }, [buddyCode]);
+
+  function follow() {
+    const code = input.trim().toUpperCase();
+    if (!code) return;
+    if (code === myCode) { setErr("That's your own code!"); return; }
+    setErr("");
+    setState({ buddyCode: code });
+    setBuddyCode(code);
+    setInput("");
+  }
+
+  function unfollow() {
+    setState({ buddyCode: null });
+    setBuddyCode(null);
+    setBuddy(null);
+  }
+
+  return (
+    <Section title="Study buddy">
+      <div className="rounded-2xl bg-ink-700 neural-border p-4 space-y-4">
+        {/* My code to share */}
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-slate-400 text-xs">Your buddy code</p>
+            <p className="text-neural font-bold text-lg tracking-widest font-mono">
+              {myCode ?? "······"}
+            </p>
+          </div>
+          {myCode && (
+            <button
+              onClick={() => navigator.clipboard?.writeText(myCode).catch(() => {})}
+              className="text-slate-400 text-xs px-3 py-1.5 rounded-lg bg-ink-600 border border-ink-400
+                         hover:text-slate-200 transition-colors"
+            >
+              Copy
+            </button>
+          )}
+        </div>
+
+        {/* Buddy forecast, or the follow form */}
+        {buddy ? (
+          <div className="border-t border-ink-500/40 pt-3">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-slate-200 text-sm font-medium">
+                👥 Buddy {buddyCode}
+              </p>
+              <button onClick={unfollow} className="text-slate-500 text-xs hover:text-slate-300">
+                Unfollow
+              </button>
+            </div>
+            <p className="text-slate-400 text-xs leading-relaxed">
+              {buddy.fading > 0
+                ? `${buddy.fading} concept${buddy.fading > 1 ? "s" : ""} fading`
+                : "memory holding strong"}
+              {buddy.reviews_due > 0 && ` · ${buddy.reviews_due} review${buddy.reviews_due > 1 ? "s" : ""} due`}
+              {` · ${buddy.session_count} session${buddy.session_count !== 1 ? "s" : ""}`}
+            </p>
+            {buddy.fading > 0 && (
+              <p className="text-amber-300/80 text-xs mt-1">
+                Nudge them to review before it slips away 👀
+              </p>
+            )}
+          </div>
+        ) : (
+          <div className="border-t border-ink-500/40 pt-3">
+            <p className="text-slate-400 text-xs mb-2">Follow a buddy's forecast</p>
+            <div className="flex gap-2">
+              <input
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder="Enter their code"
+                maxLength={12}
+                className="flex-1 bg-ink-800 border border-ink-500/60 rounded-lg px-3 py-2 text-sm text-white
+                           placeholder:text-slate-600 uppercase tracking-widest focus:border-neural/40 outline-none"
+              />
+              <button
+                onClick={follow}
+                className="px-4 py-2 rounded-lg bg-neural text-ink-900 text-sm font-semibold
+                           hover:bg-neural-glow transition-all"
+              >
+                Follow
+              </button>
+            </div>
+            {err && <p className="text-rose-400 text-xs mt-2">{err}</p>}
+          </div>
+        )}
+      </div>
+    </Section>
   );
 }

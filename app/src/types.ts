@@ -153,6 +153,22 @@ export interface Flashcard {
   flagged: boolean;
 }
 
+export interface ShareCodeResponse {
+  user_id: number;
+  share_code: string;
+}
+
+/** #9 study-buddy — privacy-safe summary only (no content or raw scores). */
+export interface BuddyForecast {
+  share_code: string;
+  confidence: ConfidenceLevel;
+  session_count: number;
+  fading: number;
+  cooling: number;
+  solid: number;
+  reviews_due: number;
+}
+
 export interface QuestionsResponse {
   material_id: number;
   title: string;

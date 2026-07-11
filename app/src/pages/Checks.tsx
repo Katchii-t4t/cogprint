@@ -2,8 +2,8 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { currentUserId } from "../store";
+import { recordActivity } from "../streak";
 import type { PendingCheckItem } from "../types";
-import { label } from "../insights";
 
 export default function Checks() {
   const navigate = useNavigate();
@@ -38,6 +38,9 @@ export default function Checks() {
         score: score / 100,
       })
       .catch(() => {});
+
+    // #4 retention streak — a completed check counts toward the streak.
+    recordActivity(score / 100);
 
     if (current < checks.length - 1) {
       setCurrent((c) => c + 1);
@@ -99,7 +102,7 @@ export default function Checks() {
             How much do you still remember?
           </h2>
           <p className="text-slate-400 text-sm mt-1">
-            From your session using <span className="text-neural">{label("active_recall")}</span>
+            From an earlier study session
           </p>
         </div>
 

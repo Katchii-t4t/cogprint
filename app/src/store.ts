@@ -12,6 +12,8 @@ export interface AppState {
   lastMaterialId: number | null;
   /** Title of the last material, for friendlier headings. */
   lastMaterialTitle: string | null;
+  /** #9 study-buddy: a friend's share code we're following (their forecast). */
+  buddyCode: string | null;
 }
 
 const EMPTY: AppState = {
@@ -19,6 +21,7 @@ const EMPTY: AppState = {
   group: null,
   lastMaterialId: null,
   lastMaterialTitle: null,
+  buddyCode: null,
 };
 
 export function getState(): AppState {

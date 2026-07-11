@@ -10,6 +10,8 @@ import type {
   QuestionsResponse,
   StudySession,
   RetentionCheck,
+  ShareCodeResponse,
+  BuddyForecast,
 } from "./types";
 
 const BASE = import.meta.env.VITE_API_BASE ?? "/api";
@@ -90,4 +92,11 @@ export const api = {
 
   getPendingChecks: (userId: number) =>
     req<PendingCheckItem[]>(`/users/${userId}/pending-checks`),
+
+  // #9 study-buddy — get/create my share code, and read a buddy's forecast.
+  getShareCode: (userId: number) =>
+    req<ShareCodeResponse>(`/users/${userId}/share-code`, { method: "POST" }),
+
+  getBuddyForecast: (shareCode: string) =>
+    req<BuddyForecast>(`/buddy/${shareCode.toUpperCase()}/forecast`),
 };

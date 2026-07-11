@@ -2,9 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { currentUserId, currentHour, lastMaterialId as storedMaterialId } from "../store";
+import { recordActivity } from "../streak";
+import { resolveMode } from "../study";
 import type { Flashcard } from "../types";
 
-type CardState = "front" | "back";
 type Result = "correct" | "wrong";
 
 interface CardResult {
@@ -16,11 +17,14 @@ interface CardResult {
 export default function Cards() {
   const [params] = useSearchParams();
   const materialId = params.get("m") ? Number(params.get("m")) : storedMaterialId();
+  // #3 fix: the study mode drives which technique we honestly log (default: active recall).
+  const mode = resolveMode(params.get("mode"));
   const navigate = useNavigate();
 
   const [cards, setCards] = useState<Flashcard[]>([]);
   const [idx, setIdx] = useState(0);
-  const [cardState, setCardState] = useState<CardState>("front");
+  // For re-reading the answer is shown up front; every other mode reveals it.
+  const [revealed, setRevealed] = useState(mode.interaction === "reread");
   const [results, setResults] = useState<CardResult[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -49,9 +53,10 @@ export default function Cards() {
   }, [materialId, navigate]);
 
   const current = cards[idx];
+  const canSwipe = revealed && (mode.interaction === "flip" || mode.interaction === "test");
 
-  function flip() {
-    if (cardState === "front") setCardState("back");
+  function reveal() {
+    if (!revealed) setRevealed(true);
   }
 
   async function flag() {
@@ -70,7 +75,8 @@ export default function Cards() {
   }
 
   function advance() {
-    setCardState("front");
+    // Re-reading shows the answer immediately; all other modes hide it again.
+    setRevealed(mode.interaction === "reread");
     setSwipeX(0);
     if (idx < cards.length - 1) {
       setIdx((i) => i + 1);
@@ -95,11 +101,15 @@ export default function Cards() {
       Math.round((Date.now() - startTime.current) / 60_000)
     );
 
+    // #4 retention streak — record this round locally (best-effort, no backend).
+    recordActivity(score);
+
     try {
       await api.logSession({
         user_id: userId,
         material_id: materialId ?? undefined,
-        technique: "active_recall",
+        // Honest technique for THIS session — no longer hardcoded active_recall.
+        technique: mode.technique,
         duration_minutes: durationMin,
         time_of_day: currentHour(),
         quiz_score: score,
@@ -111,16 +121,16 @@ export default function Cards() {
     navigate(`/grow?score=${Math.round(score * 100)}`);
   }
 
-  // Touch swipe handlers
+  // Touch swipe handlers (only meaningful once the answer is revealed in flip/test).
   function onTouchStart(e: React.TouchEvent) {
     touchStartX.current = e.touches[0].clientX;
   }
   function onTouchMove(e: React.TouchEvent) {
-    if (cardState !== "back") return;
+    if (!canSwipe) return;
     setSwipeX(e.touches[0].clientX - touchStartX.current);
   }
   function onTouchEnd() {
-    if (cardState !== "back") return;
+    if (!canSwipe) return;
     if (swipeX > 80) answer("correct");
     else if (swipeX < -80) answer("wrong");
     else setSwipeX(0);
@@ -129,7 +139,7 @@ export default function Cards() {
   if (loading) return <LoadingState />;
   if (needsSetup) return <NeedsSetupState materialId={materialId} navigate={navigate} />;
   if (error) return <ErrorState msg={error} onBack={() => navigate("/")} />;
-  if (logging) return <LoggingState />;
+  if (logging) return <LoggingState mode={mode.label} />;
   if (cards.length === 0) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center min-h-dvh bg-ink-900 gap-4 px-6">
@@ -142,11 +152,12 @@ export default function Cards() {
   }
 
   const progress = idx / cards.length;
+  const showRating = revealed; // rating (correct/wrong) is available once revealed
 
   return (
     <div className="flex flex-col min-h-dvh bg-ink-900 max-w-lg mx-auto w-full px-4 py-8">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-3">
         <button onClick={() => navigate("/")} className="text-slate-500 text-sm hover:text-slate-300">
           ✕
         </button>
@@ -159,6 +170,15 @@ export default function Cards() {
         >
           Skip all
         </button>
+      </div>
+
+      {/* Mode banner — makes the technique explicit and honest */}
+      <div className="flex items-center gap-2 mb-4 rounded-xl bg-ink-700/60 border border-ink-500/40 px-3 py-2">
+        <span>{mode.emoji}</span>
+        <div className="min-w-0">
+          <p className="text-slate-200 text-xs font-semibold">{mode.label}</p>
+          <p className="text-slate-500 text-[11px] leading-tight truncate">{mode.instruction}</p>
+        </div>
       </div>
 
       {/* Progress bar */}
@@ -181,12 +201,13 @@ export default function Cards() {
           onTouchStart={onTouchStart}
           onTouchMove={onTouchMove}
           onTouchEnd={onTouchEnd}
-          onClick={flip}
+          onClick={mode.interaction === "flip" ? reveal : undefined}
         >
           <div
-            className="w-full rounded-3xl bg-ink-700 neural-border p-8 cursor-pointer select-none
+            className="w-full rounded-3xl bg-ink-700 neural-border p-8 select-none
                        min-h-[260px] flex flex-col items-center justify-center gap-4 relative"
             style={{
+              cursor: mode.interaction === "flip" && !revealed ? "pointer" : "default",
               boxShadow:
                 swipeX > 40
                   ? "0 0 32px rgba(34,197,94,0.25)"
@@ -201,36 +222,58 @@ export default function Cards() {
                 {current.difficulty}
               </span>
             </div>
-
             {/* Concept badge */}
             <div className="absolute top-4 right-4">
               <span className="text-[10px] text-neural/60 font-medium">{current.concept}</span>
             </div>
 
-            {cardState === "front" ? (
-              <>
-                <p className="text-white text-center text-lg font-medium leading-snug">
-                  {current.question}
-                </p>
-                <p className="text-slate-600 text-xs">Tap to reveal →</p>
-              </>
-            ) : (
-              <>
+            {/* Question is always visible */}
+            <p className="text-white text-center text-lg font-medium leading-snug">
+              {current.question}
+            </p>
+
+            {/* Elaborative mode: prompt the learner to explain before revealing */}
+            {mode.interaction === "explain" && !revealed && (
+              <p className="text-slate-500 text-xs text-center">
+                Say (or think) <span className="text-neural/70">why</span> this is true, then reveal.
+              </p>
+            )}
+
+            {/* Answer */}
+            {revealed ? (
+              <div className="w-full border-t border-ink-500/40 pt-4 mt-1">
                 <p className="text-neural-glow text-center text-base leading-relaxed">
                   {current.answer}
                 </p>
-                {swipeX === 0 && (
-                  <p className="text-slate-600 text-xs mt-2">
+                {canSwipe && swipeX === 0 && (
+                  <p className="text-slate-600 text-xs text-center mt-3">
                     ← Wrong · Swipe or tap below · Correct →
                   </p>
                 )}
-              </>
+              </div>
+            ) : (
+              mode.interaction !== "explain" && (
+                <p className="text-slate-600 text-xs">
+                  {mode.interaction === "test" ? "Commit your answer, then reveal ↓" : "Tap to reveal →"}
+                </p>
+              )
             )}
           </div>
         </div>
 
-        {/* Answer buttons — only shown after flip */}
-        {cardState === "back" && (
+        {/* Reveal button (test + explain modes need a deliberate reveal) */}
+        {!revealed && mode.interaction !== "flip" && (
+          <button
+            onClick={reveal}
+            className="w-full py-4 rounded-2xl bg-ink-600 border border-ink-400 text-slate-200
+                       font-semibold hover:bg-ink-500 active:scale-[0.97] transition-all animate-fade-up"
+          >
+            Reveal answer
+          </button>
+        )}
+
+        {/* Rating buttons — shown once the answer is revealed */}
+        {showRating && (
           <div className="w-full flex gap-3 animate-fade-up">
             <button
               onClick={() => answer("wrong")}
@@ -238,7 +281,7 @@ export default function Cards() {
                          text-red-400 font-semibold hover:bg-red-900/40 active:scale-[0.97]
                          transition-all"
             >
-              ✕ Again
+              {mode.interaction === "reread" ? "✕ Couldn't recall" : "✕ Again"}
             </button>
             <button
               onClick={() => answer("correct")}
@@ -246,7 +289,7 @@ export default function Cards() {
                          text-green-400 font-semibold hover:bg-green-900/40 active:scale-[0.97]
                          transition-all"
             >
-              ✓ Got it
+              {mode.interaction === "reread" ? "✓ Could recall" : "✓ Got it"}
             </button>
           </div>
         )}
@@ -272,11 +315,11 @@ function LoadingState() {
   );
 }
 
-function LoggingState() {
+function LoggingState({ mode }: { mode: string }) {
   return (
     <div className="flex-1 flex flex-col items-center justify-center min-h-dvh gap-4 bg-ink-900">
       <div className="w-10 h-10 rounded-full border-2 border-neural/40 border-t-neural animate-spin" />
-      <p className="text-slate-400 text-sm">Updating your fingerprint…</p>
+      <p className="text-slate-400 text-sm">Logging your {mode} session…</p>
     </div>
   );
 }
