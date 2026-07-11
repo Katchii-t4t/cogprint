@@ -29,7 +29,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from database import CognitiveFingerprint, RetentionCheck, StudyGroup, StudySession, User
+from database import CognitiveFingerprint, RetentionCheck, StudyGroup, StudySession, User, utcnow
 from personalization.forgetting_curve import compute_memory_profiles
 from personalization.hierarchical_memory import HierarchicalMemoryModel
 from personalization.linucb import (
@@ -546,7 +546,7 @@ def rebuild_fingerprint(db: Session, user_id: int) -> FingerprintProfile:
         )
         fp_row.session_count = n
         fp_row.profile_json  = profile.model_dump_json()
-        fp_row.updated_at    = datetime.utcnow()
+        fp_row.updated_at    = utcnow()
         db.commit()
         return profile
 
@@ -617,7 +617,7 @@ def rebuild_fingerprint(db: Session, user_id: int) -> FingerprintProfile:
     fp_row.session_count      = n
     fp_row.profile_json       = profile.model_dump_json()
     fp_row.bandit_state_json  = bandit.to_json()
-    fp_row.updated_at         = datetime.utcnow()
+    fp_row.updated_at         = utcnow()
     db.commit()
     db.refresh(fp_row)
 

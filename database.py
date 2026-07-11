@@ -1,6 +1,7 @@
 import enum
 import os
-from datetime import datetime
+import secrets
+from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 from sqlalchemy import (
@@ -9,6 +10,16 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, Session, relationship, sessionmaker
 
 load_dotenv()
+
+
+def utcnow() -> datetime:
+    """Naive UTC timestamp — the non-deprecated replacement for datetime.utcnow().
+
+    Columns store naive datetimes, and several endpoints compare them directly
+    (e.g. `now >= session.created_at + delay`), so we deliberately strip tzinfo to
+    keep every stored/compared value naive-UTC and avoid aware/naive TypeErrors.
+    """
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./cogprint.db")
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
@@ -41,14 +52,27 @@ class StudyGroup(str, enum.Enum):
     TREATMENT = "treatment"
 
 
+# Unambiguous alphabet for share codes (no 0/O/1/I/L) so buddies can type them.
+_SHARE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+
+
+def generate_share_code(length: int = 6) -> str:
+    """Short, human-typable, URL-safe buddy code (see #9 in COGPRINT_IDEAS.md)."""
+    return "".join(secrets.choice(_SHARE_ALPHABET) for _ in range(length))
+
+
 class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=utcnow, nullable=False)
     group = Column(Enum(StudyGroup), nullable=False)
     pre_test_score = Column(Float, nullable=True)
     post_test_score = Column(Float, nullable=True)
+    # #9 study-buddy: a short shareable code so two users can see each other's
+    # privacy-safe forecast without any account system. Nullable for users that
+    # predate this column; generated lazily via the API when missing.
+    share_code = Column(String(12), unique=True, index=True, nullable=True)
 
     sessions = relationship("StudySession", back_populates="user")
     retention_checks = relationship("RetentionCheck", back_populates="user")
@@ -59,7 +83,7 @@ class Material(Base):
     __tablename__ = "materials"
 
     id = Column(Integer, primary_key=True, index=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=utcnow, nullable=False)
     title = Column(String(255), nullable=False)
     raw_text = Column(Text, nullable=False)
     knowledge_map_json = Column(Text, nullable=True)
@@ -74,7 +98,7 @@ class StudySession(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     material_id = Column(Integer, ForeignKey("materials.id"), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=utcnow, nullable=False)
     technique = Column(Enum(StudyTechnique), nullable=False)
     duration_minutes = Column(Integer, nullable=False)
     time_of_day = Column(Enum(TimeOfDay), nullable=False)
@@ -93,7 +117,7 @@ class RetentionCheck(Base):
     id = Column(Integer, primary_key=True, index=True)
     session_id = Column(Integer, ForeignKey("study_sessions.id"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    checked_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    checked_at = Column(DateTime, default=utcnow, nullable=False)
     check_type = Column(String(10), nullable=False)  # "24h" or "7d"
     score = Column(Float, nullable=False)  # 0.0–1.0
 
@@ -106,7 +130,7 @@ class CognitiveFingerprint(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
     session_count = Column(Integer, default=0, nullable=False)
     profile_json = Column(Text, nullable=True)      # serialized FingerprintProfile
     bandit_state_json = Column(Text, nullable=True)  # serialized LinUCBRecommender

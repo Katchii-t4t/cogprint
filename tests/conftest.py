@@ -76,11 +76,11 @@ def add_retention(client, session_id, user_id, check_type, score):
 
 def backdate_session(session_id, days=0, hours=0):
     """Move a session's created_at into the past so retention checks come due."""
-    from datetime import datetime, timedelta
+    from datetime import timedelta
     db = database.SessionLocal()
     try:
         obj = db.get(database.StudySession, session_id)
-        obj.created_at = datetime.utcnow() - timedelta(days=days, hours=hours)
+        obj.created_at = database.utcnow() - timedelta(days=days, hours=hours)
         db.commit()
     finally:
         db.close()

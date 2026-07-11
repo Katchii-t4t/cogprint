@@ -22,8 +22,10 @@ from database import (
     StudyGroup,
     StudySession,
     User,
+    generate_share_code,
     get_db,
     init_db,
+    utcnow,
 )
 from personalization.fingerprint_builder import load_profile, rebuild_fingerprint
 from schemas.fingerprint import ConfidenceLevel, FingerprintProfile
@@ -91,9 +93,23 @@ def _rebuild_fingerprint_bg(user_id: int) -> None:
 # Users
 # ---------------------------------------------------------------------------
 
+def _fresh_share_code(db: Session) -> str:
+    """A share code guaranteed unique in the users table."""
+    for _ in range(10):
+        code = generate_share_code()
+        if not db.query(User).filter_by(share_code=code).first():
+            return code
+    # Astronomically unlikely after 10 tries; widen the code as a fallback.
+    return generate_share_code(10)
+
+
 @app.post("/users", response_model=UserResponse, status_code=201)
 def create_user(body: UserCreate, db: Session = Depends(get_db)):
-    user = User(group=body.group, pre_test_score=body.pre_test_score)
+    user = User(
+        group=body.group,
+        pre_test_score=body.pre_test_score,
+        share_code=_fresh_share_code(db),
+    )
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -238,7 +254,7 @@ def get_fingerprint(user_id: int, db: Session = Depends(get_db)):
         return FingerprintResponse(
             user_id=user_id,
             fingerprint=profile,
-            updated_at=datetime.utcnow(),
+            updated_at=utcnow(),
         )
 
     return FingerprintResponse(
@@ -261,7 +277,7 @@ def force_rebuild_fingerprint(user_id: int, db: Session = Depends(get_db)):
     return FingerprintResponse(
         user_id=user_id,
         fingerprint=profile,
-        updated_at=fp.updated_at if fp else datetime.utcnow(),
+        updated_at=fp.updated_at if fp else utcnow(),
     )
 
 
@@ -490,7 +506,7 @@ def export_study_data(
         })
 
     output.seek(0)
-    filename = f"cogprint_export_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+    filename = f"cogprint_export_{utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
     return StreamingResponse(
         iter([output.getvalue()]),
         media_type="text/csv",
@@ -541,7 +557,7 @@ def get_pending_checks(user_id: int, db: Session = Depends(get_db)) -> List[Pend
         for rc in db.query(RetentionCheck).filter(RetentionCheck.session_id.in_(session_ids)).all():
             done_checks.add((rc.session_id, rc.check_type))
 
-    now = datetime.utcnow()
+    now = utcnow()
     pending: list[PendingCheckItem] = []
     # Iterate the locked schedule (config.RETENTION_SCHEDULE) so adding or moving
     # a checkpoint is a single edit in config.py, not scattered branches here.
@@ -555,6 +571,99 @@ def get_pending_checks(user_id: int, db: Session = Depends(get_db)) -> List[Pend
                 ))
 
     return pending
+
+
+# ---------------------------------------------------------------------------
+# #9 Study-buddy — privacy-safe forecast sharing via a short code.
+#
+# The ONLY thing a buddy can see is the aggregate forecast below: confidence,
+# session count, and how many concepts are fading/cooling/solid. Never raw
+# sessions, material content, scores, or the full fingerprint.
+# ---------------------------------------------------------------------------
+
+class BuddyForecast(BaseModel):
+    share_code: str
+    confidence: str
+    session_count: int
+    fading: int
+    cooling: int
+    solid: int
+    reviews_due: int
+
+
+class ShareCodeResponse(BaseModel):
+    user_id: int
+    share_code: str
+
+
+def _reviews_due_count(db: Session, user_id: int) -> int:
+    """How many retention checks are currently due (mirrors get_pending_checks)."""
+    sessions = db.query(StudySession).filter_by(user_id=user_id).all()
+    session_ids = [s.id for s in sessions]
+    done: set[tuple[int, str]] = set()
+    if session_ids:
+        for rc in db.query(RetentionCheck).filter(
+            RetentionCheck.session_id.in_(session_ids)
+        ).all():
+            done.add((rc.session_id, rc.check_type))
+    now = utcnow()
+    count = 0
+    for s in sessions:
+        for cp in RETENTION_SCHEDULE:
+            if now >= s.created_at + cp.delay and (s.id, cp.key) not in done:
+                count += 1
+    return count
+
+
+def _buddy_forecast(db: Session, user: User) -> BuddyForecast:
+    fp = db.query(CognitiveFingerprint).filter_by(user_id=user.id).first()
+    fading = cooling = solid = 0
+    confidence = "low"
+    session_count = 0
+    if fp and fp.profile_json:
+        profile = load_profile(fp)
+        confidence = profile.confidence.value if hasattr(profile.confidence, "value") else str(profile.confidence)
+        session_count = profile.session_count
+        # Same buckets as the frontend memory forecast (forecast.ts).
+        for m in profile.memory_profiles:
+            r = m.predicted_retention_7d
+            if r < 0.5:
+                fading += 1
+            elif r < 0.8:
+                cooling += 1
+            else:
+                solid += 1
+    return BuddyForecast(
+        share_code=user.share_code or "",
+        confidence=confidence,
+        session_count=session_count,
+        fading=fading,
+        cooling=cooling,
+        solid=solid,
+        reviews_due=_reviews_due_count(db, user.id),
+    )
+
+
+@app.post("/users/{user_id}/share-code", response_model=ShareCodeResponse)
+def get_or_create_share_code(user_id: int, db: Session = Depends(get_db)):
+    """Return this user's buddy code, generating one lazily if they predate it."""
+    user = db.query(User).filter_by(id=user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if not user.share_code:
+        user.share_code = _fresh_share_code(db)
+        db.commit()
+        db.refresh(user)
+    return ShareCodeResponse(user_id=user.id, share_code=user.share_code)
+
+
+@app.get("/buddy/{share_code}/forecast", response_model=BuddyForecast)
+def get_buddy_forecast(share_code: str, db: Session = Depends(get_db)):
+    """A buddy's privacy-safe forecast summary. No content, sessions, or scores."""
+    user = db.query(User).filter_by(share_code=share_code.upper()).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="No buddy with that code")
+    return _buddy_forecast(db, user)
 
 
 # ---------------------------------------------------------------------------
