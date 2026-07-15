@@ -51,7 +51,7 @@ from collections import defaultdict
 from typing import Optional
 
 from schemas.fingerprint import FingerprintProfile
-from schemas.session import KnowledgeMap, StudyPlanDay, StudyPlanResponse
+from schemas.session import KnowledgeMap, MaterialProfile, StudyPlanDay, StudyPlanResponse
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -135,7 +135,50 @@ def _stability_map(fp: FingerprintProfile) -> dict[str, float]:
     return s_map
 
 
-# ── Concept difficulty → technique mapping ────────────────────────────────────
+# ── Concept difficulty × type → technique matching ────────────────────────────
+#
+# Evidence-based ordering per cognitive context (Dunlosky et al. 2013). The FIRST
+# technique fits the context best, the rest are progressively weaker fits. This is
+# the *material* signal — which techniques the text itself calls for, before we
+# know anything about the learner.
+#
+#   foundational × factual     → spaced_repetition (high-utility for facts)
+#   foundational × procedural  → practice_testing  (procedural fluency)
+#   intermediate × conceptual  → active_recall     (elaborative retrieval)
+#   advanced     × conceptual  → elaborative_interrogation  (deep processing)
+#   advanced     × procedural  → interleaving      (transfer across contexts)
+_CANDIDATES_BY_CONTEXT: dict[tuple[str, str], list[str]] = {
+    ("foundational", "factual"):     ["spaced_repetition", "practice_testing", "active_recall"],
+    ("foundational", "conceptual"):  ["active_recall", "spaced_repetition", "mind_maps"],
+    ("foundational", "procedural"):  ["practice_testing", "active_recall", "spaced_repetition"],
+    ("intermediate", "factual"):     ["spaced_repetition", "active_recall", "practice_testing"],
+    ("intermediate", "conceptual"):  ["active_recall", "elaborative_interrogation", "mind_maps"],
+    ("intermediate", "procedural"):  ["practice_testing", "interleaving", "active_recall"],
+    ("advanced",     "factual"):     ["spaced_repetition", "interleaving", "active_recall"],
+    ("advanced",     "conceptual"):  ["elaborative_interrogation", "active_recall", "interleaving"],
+    ("advanced",     "procedural"):  ["interleaving", "practice_testing", "elaborative_interrogation"],
+}
+
+# Rank → material weight. Descending, with a non-trivial FLOOR for techniques the
+# context doesn't call out, so a learner with a strong *measured* advantage in some
+# other technique can still surface it. This is the honesty guardrail: material
+# type is a MODULATION on top of a strong general prior, not a hard gate. The
+# general finding (testing/spacing win broadly) stays dominant; material tilts it.
+_RANK_WEIGHTS = [1.0, 0.72, 0.55]
+_MATERIAL_FLOOR = 0.45
+
+
+def _material_weights(difficulty: str, concept_type: str) -> dict[str, float]:
+    """Material prior: technique → fit weight in (0, 1] for this concept's context."""
+    ordered = _CANDIDATES_BY_CONTEXT.get(
+        (difficulty, concept_type),
+        ["active_recall", "spaced_repetition", "practice_testing"],  # sensible default
+    )
+    weights: dict[str, float] = {}
+    for i, tech in enumerate(ordered):
+        weights[tech] = _RANK_WEIGHTS[i] if i < len(_RANK_WEIGHTS) else _MATERIAL_FLOOR
+    return weights
+
 
 def _technique_for_concept(
     difficulty:   str,
@@ -144,44 +187,31 @@ def _technique_for_concept(
     eff_map:      dict[str, float],
 ) -> str:
     """
-    Heuristic: pick the best-performing technique that matches the concept's
-    cognitive demand.  Evidence-based defaults (Dunlosky et al. 2013):
+    Match a technique to a concept by combining TWO signals:
 
-    difficulty  × type         → preferred technique
-    foundational × factual     → spaced_repetition (high-utility for facts)
-    foundational × procedural  → practice_testing  (procedural fluency)
-    intermediate × conceptual  → active_recall     (elaborative retrieval)
-    advanced     × conceptual  → elaborative_interrogation  (deep processing)
-    advanced     × procedural  → interleaving      (transfer across contexts)
+        score(technique) = material_fit(technique) × learner_effectiveness(technique)
+
+    - material_fit comes from the concept's (difficulty × type) context (Dunlosky).
+    - learner_effectiveness comes from the fingerprint (measured 7d retention),
+      defaulting to a flat 0.70 prior for techniques with no data yet.
+
+    Cold start (no measured data): every effectiveness ≈ 0.70, so the material
+    signal decides — the text drives the recommendation. As retention data
+    accrues, effectiveness differentiates and personalises the pick. Crucially,
+    the learner's global-best technique no longer auto-wins just by appearing in
+    the candidate list (the old behaviour, which flattened everything toward one
+    technique) — it only wins where the material also supports it, or where the
+    measured personal advantage is large enough to overcome a weaker material fit.
     """
-    candidates_by_context = {
-        ("foundational", "factual"):     ["spaced_repetition", "practice_testing", "active_recall"],
-        ("foundational", "conceptual"):  ["active_recall", "spaced_repetition", "mind_maps"],
-        ("foundational", "procedural"):  ["practice_testing", "active_recall", "spaced_repetition"],
-        ("intermediate", "factual"):     ["spaced_repetition", "active_recall", "practice_testing"],
-        ("intermediate", "conceptual"):  ["active_recall", "elaborative_interrogation", "mind_maps"],
-        ("intermediate", "procedural"):  ["practice_testing", "interleaving", "active_recall"],
-        ("advanced",     "factual"):     ["spaced_repetition", "interleaving", "active_recall"],
-        ("advanced",     "conceptual"):  ["elaborative_interrogation", "active_recall", "interleaving"],
-        ("advanced",     "procedural"):  ["interleaving", "practice_testing", "elaborative_interrogation"],
-    }
-    candidates = candidates_by_context.get(
-        (difficulty, concept_type),
-        [best_overall, "active_recall", "spaced_repetition"],
-    )
+    mat_w = _material_weights(difficulty, concept_type)
+    techniques = set(mat_w) | set(eff_map) | {best_overall}
 
-    # 1. If the user's overall best technique is among the contextually appropriate
-    #    candidates, honour it — it's the most direct personalisation signal.
-    if best_overall in candidates:
-        return best_overall
+    def score(tech: str) -> tuple[float, bool, str]:
+        s = mat_w.get(tech, _MATERIAL_FLOOR) * eff_map.get(tech, 0.70)
+        # Deterministic tie-break: prefer the learner's global best, then name.
+        return (s, tech == best_overall, tech)
 
-    # 2. If we have measured effectiveness data (not just defaults), use it.
-    measured = {t: v for t, v in eff_map.items() if v != 0.70}  # 0.70 = prior default
-    if measured:
-        return max(candidates, key=lambda t: measured.get(t, 0.60))
-
-    # 3. Fall back to evidence-based default order.
-    return candidates[0]
+    return max(techniques, key=score)
 
 
 # ── Priority score ────────────────────────────────────────────────────────────
@@ -238,6 +268,48 @@ def _rationale(
         f"Review scheduled for '{concept}': {pct}% forgetting predicted "
         f"({lag} days since last study, S≈{S:.0f}d). "
         f"{tech_label.title()} maximises re-encoding efficiency."
+    )
+
+
+# ── Material profile ──────────────────────────────────────────────────────────
+
+def _material_profile(knowledge_map: KnowledgeMap) -> MaterialProfile:
+    """
+    Aggregate the per-concept (type × difficulty) distribution into a single
+    material-level cognitive profile, and name the technique the material as a
+    whole leans toward (material signal only — no learner data involved).
+    """
+    concepts = knowledge_map.concepts
+    n = len(concepts) or 1
+    type_counts: dict[str, int] = defaultdict(int)
+    diff_counts: dict[str, int] = defaultdict(int)
+    for c in concepts:
+        type_counts[c.concept_type] += 1
+        diff_counts[c.difficulty] += 1
+
+    type_mix = {k: round(v / n, 3) for k, v in type_counts.items()}
+    diff_mix = {k: round(v / n, 3) for k, v in diff_counts.items()}
+
+    dominant_type = max(type_counts, key=lambda k: type_counts[k]) if type_counts else "conceptual"
+    dominant_diff = max(diff_counts, key=lambda k: diff_counts[k]) if diff_counts else "intermediate"
+
+    # Technique the material leans toward, from the material prior alone.
+    lead_weights = _material_weights(dominant_diff, dominant_type)
+    lead = max(lead_weights, key=lambda k: lead_weights[k])
+
+    type_pct = round(type_mix.get(dominant_type, 0.0) * 100)
+    summary = (
+        f"This material is mostly {dominant_type} at {dominant_diff} level "
+        f"({type_pct}% {dominant_type}). Research favours "
+        f"{lead.replace('_', ' ')} for this kind of content — "
+        f"we weight it against your own measured strengths."
+    )
+    return MaterialProfile(
+        dominant_type       = dominant_type,
+        dominant_difficulty = dominant_diff,
+        type_mix            = type_mix,
+        difficulty_mix      = diff_mix,
+        summary             = summary,
     )
 
 
@@ -425,14 +497,22 @@ class StudyPlanner:
                 last_studied[name]  = day_idx
                 next_review[name]   = _next_review_day(day_idx, S)
 
-        # ── General advice ────────────────────────────────────────────────────
-        general_advice = _build_general_advice(fingerprint, confidence, total_days)
+        # ── Material profile + general advice ──────────────────────────────────
+        # The material profile drives material-aware surfacing and leads the
+        # advice so the learner sees WHY these techniques were chosen for THIS text.
+        material_profile = _material_profile(knowledge_map)
+        general_advice = (
+            material_profile.summary
+            + "  "
+            + _build_general_advice(fingerprint, confidence, total_days)
+        )
 
         return StudyPlanResponse(
             user_id      = user_id,
             total_days   = total_days,
             days         = plan_days,
             general_advice = general_advice,
+            material_profile = material_profile,
         )
 
 

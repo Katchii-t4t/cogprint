@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -122,11 +122,27 @@ class StudyPlanDay(BaseModel):
     rationale: str
 
 
+class MaterialProfile(BaseModel):
+    """Aggregate cognitive shape of the material itself, independent of any
+    learner. Drives material-aware technique matching: some techniques fit
+    factual/foundational text, others fit abstract/advanced text (Dunlosky
+    et al. 2013). Combined with the fingerprint to pick a technique per concept."""
+
+    dominant_type: str                 # factual | conceptual | procedural
+    dominant_difficulty: str           # foundational | intermediate | advanced
+    type_mix: Dict[str, float]         # normalised proportions, sums to ~1
+    difficulty_mix: Dict[str, float]   # normalised proportions, sums to ~1
+    summary: str                       # one human-readable sentence
+
+
 class StudyPlanResponse(BaseModel):
     user_id: int
     total_days: int
     days: List[StudyPlanDay]
     general_advice: str
+    # Optional so existing callers/clients are unaffected (older frontends just
+    # ignore it). Populated by the planner for material-aware surfacing.
+    material_profile: Optional[MaterialProfile] = None
 
 
 class KnowledgeConcept(BaseModel):
