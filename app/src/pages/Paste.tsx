@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import {
   addRecent, dismissNudge, getState, nudgeAllowed, setState,
@@ -41,6 +41,7 @@ export default function Paste() {
   const [restoreId, setRestoreId] = useState("");
   const [restoreErr, setRestoreErr] = useState("");
   const navigate = useNavigate();
+  const [params] = useSearchParams();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
 
@@ -96,6 +97,35 @@ export default function Paste() {
         setNudge({ kind: "checks", count: checks.length });
       }
     });
+  }, []);
+
+  // #8 shared decks — opening a `/?deck=<materialId>` link imports that deck.
+  // The plan/technique/fingerprint are still computed for THIS user, so the
+  // deck is shared but the personalization is your own (nothing leaks).
+  useEffect(() => {
+    const deck = params.get("deck");
+    if (!deck) return;
+    const materialId = Number(deck);
+    if (!Number.isFinite(materialId)) return;
+
+    (async () => {
+      setPhase("reading");
+      try {
+        let { userId, group } = getState();
+        if (!userId) {
+          const g = Math.random() < 0.5 ? "control" : "treatment";
+          const user = await api.createUser(g as "control" | "treatment");
+          userId = user.id;
+          group = user.group;
+          setState({ userId, group });
+        }
+        setState({ lastMaterialId: materialId });
+        navigate(`/plan?m=${materialId}`);
+      } catch {
+        setPhase("idle");
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function handleSubmit() {

@@ -1,0 +1,27 @@
+# Keep the image small and secret-free.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+env/
+.env
+.env.local
+*.db
+*.sqlite3
+.git/
+.gitignore
+.idea/
+.vscode/
+
+# Frontends are deployed separately (Vercel) — don't ship them in the API image.
+app/node_modules/
+app/dist/
+frontend/node_modules/
+frontend/dist/
+
+# Unrelated project sitting in the repo root.
+event_camera/
+
+# Docs aren't needed at runtime.
+*.md

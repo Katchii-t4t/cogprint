@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { currentUserId, currentHour, lastMaterialId as storedMaterialId } from "../store";
+import { resolveMode } from "../study";
 import type { Flashcard } from "../types";
 
 /**
@@ -46,6 +47,10 @@ function shuffle<T>(arr: T[]): T[] {
 export default function Cards() {
   const [params] = useSearchParams();
   const materialId = params.get("m") ? Number(params.get("m")) : storedMaterialId();
+  // The honest technique for this round, chosen in the Plan ModePicker and
+  // carried through ?mode=. Logged as the session's technique so the fingerprint
+  // finally learns which technique works — instead of always "active_recall".
+  const studyTechnique = resolveMode(params.get("mode")).technique;
   const navigate = useNavigate();
 
   const [mode, setMode] = useState<Mode>("quiz");
@@ -192,7 +197,7 @@ export default function Cards() {
         await api.logSession({
           user_id: userId,
           material_id: materialId ?? undefined,
-          technique: "active_recall",
+          technique: studyTechnique,
           duration_minutes: durationMin,
           time_of_day: currentHour(),
           quiz_score: score,

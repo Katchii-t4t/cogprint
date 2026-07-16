@@ -1,12 +1,21 @@
 # CogPrint — Engineering Handover & Collaboration Guide
 
-**Last updated:** 2026-06-07
+**Last updated:** 2026-06-28
 **Audience:** Any AI agent (Claude Code) or human engineer continuing this project,
 including a **second Claude Code instance running on a different machine** that needs to
 collaborate on this same codebase.
 
 > If you are the "other" Claude Code bot reading this for the first time: welcome. This
 > document is your complete context. Read §0 (collaboration workflow) first, then §1–§8.
+
+> **Quick orientation (2026-06-28):** Backend + consumer app (`app/`) are both built and
+> verified end-to-end locally (see §9 work log). **Nothing is deployed yet** — no hosting,
+> no domain, no real users. The project is **no longer anchored to UiO** — Karthik
+> (the owner) dropped that affiliation and makes all product/scientific calls himself,
+> including the retention-schedule decision in §A.8 (don't expect or wait for a UiO
+> advisor sign-off — there isn't one). If you're picking this up cold, the most useful
+> next moves are likely: deploy the backend + `app/` somewhere (Vercel for frontend is
+> easiest), and/or add a real `ANTHROPIC_API_KEY` to unlock flashcards.
 
 ---
 
@@ -328,6 +337,8 @@ cd frontend && npx tsc --noEmit
 | 2026-07-05 | Bot B (sgkar) | **Final sync before owner leaves (~1 month, abroad).** Appendix A snapshot brought fully current (34 commits, quiz mode, consumer app, 4 features, .env locality warning, run-from-scratch incl. `app/`); README got a cold-start map. Repo is the complete handover — any session can resume from GitHub alone. | ✅ done |
 | 2026-07-05 | Bot B (sgkar, overnight) | **All 4 NEXT_FEATURES built + verified**, one commit each: F1 shareable fingerprint PNG (`lib/fingerprint.ts` + `lib/shareCard.ts`, Web Share + download, real 1104 KB PNG verified); F3 forgetting nudges (`personalization/review.py` + `GET /users/{id}/review-suggestions`, names the fading material, blinding-safe); F4 save progress (client-side name + restore-by-CogPrint-ID, browser-verified restore); F2 photo→OCR (`agents/material_ocr.py` + `POST /materials/ocr`, real vision transcription verified verbatim). Backend 34/34 tests; eslint + build green throughout. | ✅ done |
 | 2026-06-18 | Bot A (Karthik's PC) | **Consumer app built (`app/`) — all 4 screens + retention checks, verified end-to-end against the live backend.** See "Bot A — consumer app" below. | ✅ done |
+| 2026-06-28 | Bot A (Karthik's PC) | **Project decoupled from UiO** — Karthik keeps full ownership/leadership; the retention-schedule decision (§A.8) is now his call alone, no advisor meeting pending. Polished `app/` (Pomodoro timer, PWA icons, README) and re-verified the full flow live. Nothing deployed yet — that's the open item for whoever picks this up next. | ✅ done |
+| 2026-07-10 | Bot A (Karthik's PC) | **Big feature night.** Built 7 fingerprint-native app features + the multi-modal-study fix + deploy scaffolding + a master problem inventory. See "Bot A — feature night" below. | ✅ done |
 
 **Bot B pass — what landed (commits `0e0acd7`..`6501f8d`):**
 - **Env-configurable CORS** (`CORS_ORIGINS`) — unblocks the deployed frontend.
@@ -398,6 +409,39 @@ research `frontend/` per §6 of that doc. Dark/neural theme (cyan on ink), mobil
 > `frontend/` path, not the consumer app. If the consumer app should drive
 > technique comparison, the plan's per-day technique would need to flow into the
 > round. Left as a product decision — not changed unilaterally.
+
+**Bot A — feature night (2026-07-10):**
+A large autonomous session while the owner slept. All verified (app `tsc` + `vite
+build` green; 24 backend tests green; live-smoked in the preview browser).
+
+- **7 fingerprint-native app features** (full specs in `COGPRINT_IDEAS.md`): #1 memory
+  weather forecast + #2 learner archetype (`app/src/forecast.ts`), #4 retention streak
+  (`app/src/streak.ts`, local-only), #5 boss battles (reframed pending checks), #3
+  "why this card, why now" on the plan, and the social pair #8 shared decks
+  (`/?deck=<id>` import) + #9 study-buddy. #9 added a lightweight identity layer: a
+  short `share_code` on `User` (`database.py`) + `POST /users/{id}/share-code` and a
+  **privacy-safe** `GET /buddy/{code}/forecast` (aggregate buckets only — never
+  sessions/content/scores). Personalised surfaces (#1/#2) are treatment-only to keep
+  the RCT blind; streak is behavioural so both groups get it.
+- **Multi-modal study — the "always active recall" fix** (`app/src/study.ts`): the
+  flashcard round no longer hardcodes `active_recall`. A mode picker on the plan
+  (defaulting to the plan's recommended technique) drives 4 honest deliverable modes
+  — Active Recall, Practice Testing, Elaborative Interrogation, Re-reading — and the
+  session logs the **real** technique used. Scheduling/ordering techniques
+  (spaced_repetition, interleaving, mind_maps) are marked non-deliverable and stay in
+  the plan, not faked as modes. This finally feeds the technique-comparison engine
+  varied data from consumer use. (Proven 2026-07-10: seeding varied techniques made
+  the real algorithm rediscover the Dunlosky 2013 ranking exactly.)
+- **`datetime.utcnow()` deprecation fixed** across `main.py`, `database.py`,
+  `fingerprint_builder.py`, `conftest.py` via a single naive-UTC `database.utcnow()`
+  helper (kept naive so aware/naive comparisons don't break).
+- **Deploy scaffolding (not deployed)**: `Dockerfile` + `.dockerignore`, `render.yaml`
+  (backend + managed Postgres), `app/vercel.json` (SPA), and `DEPLOY.md` (the
+  click-path). The `Dockerfile` adds `psycopg[binary]` for prod Postgres; local dev
+  still uses SQLite via `DATABASE_URL`.
+- **`COGPRINT_PROBLEMS.md`** — a prioritized master inventory of every gap between MVP
+  and a sellable product (deploy, real accounts, legal/GDPR, validation, etc.), each
+  with an execution prompt. Read it for what to do next; the 🔴s are the blockers.
 
 **Toolchain note (important for the other machine):** the sgkar PC had no
 Node.js — installed *portably* (no admin) at
@@ -561,14 +605,19 @@ full personalised pipeline. Confidence: <5 sessions = low, 5–15 = medium, 16+ 
 ## A.6 What works right now vs what's not built
 
 **Works (all verified live in browser or via real API calls):** the whole backend
-(**34 tests green**); the research frontend (`frontend/`, builds + PWA); the browser
-extension; and the complete consumer app (`app/`): paste→plan→study→quiz→fingerprint
-loop, quiz mode with real Opus-generated distractors, retention checks, forgetting
-nudges naming the fading material, share-card PNG (real 1104 KB render), save/restore
-by CogPrint ID, photo→OCR (real vision transcription). **Not built:** deploy (needs the
-owner's hosting choice), retention reminders/notifications, per-participant auth tokens,
-Postgres/Alembic, the Phase-5 sham engine backend, adaptive quiz difficulty, and the
-spec's later "living dashboard" layer (sleep/stress/streaks/premium).
+(**42 tests green** after the 2026-07-16 merge); the research frontend (`frontend/`,
+builds + PWA); the browser extension; and the complete consumer app (`app/`):
+paste→plan→study→round→fingerprint loop, quiz mode with real Opus-generated distractors,
+retention checks, forgetting nudges naming the fading material, share-card PNG, save/restore
+by CogPrint ID, photo→OCR. **Merged 2026-07-16** (Bot A feature-night ⋈ Bot B master): the 7
+fingerprint-native features (forecast, archetype, streak, boss battles, why-this-card, buddy
+share-code, shared decks); **material-aware technique matching** (text type × fingerprint —
+so the plan no longer collapses to active_recall); and the **honest-technique-logging fix** —
+the round now logs the technique the ModePicker chose (carried Plan→Study→Cards via `?mode=`)
+instead of hardcoding active_recall, so the fingerprint can finally learn what works.
+**Not built:** deploy (needs the owner's hosting choice), retention reminders/notifications,
+per-participant auth tokens, Postgres/Alembic, the Phase-5 sham engine backend, cold-start
+seeding, and the spec's later "living dashboard" layer.
 
 ## A.7 Security model (read before touching the LLM)
 
@@ -588,11 +637,12 @@ spec's later "living dashboard" layer (sleep/stress/streaks/premium).
 ## A.8 Open decisions (do NOT resolve unilaterally)
 
 - **Retention schedule:** code uses 24h/7d; study materials use day 1/5/10/30. This is a
-  *scientific* choice for the owner + UiO advisor (meeting ~19 Jun). See
-  `RETENTION_SCHEDULE_DECISION.md`. The flashcard mapping must use whatever
-  `config.CHECK_TYPE_KEYS` holds.
-- **Consumer app: new `app/` folder vs restyle `frontend/`** — `CONSUMER_APP_BUILD.md` §6;
-  recommended new folder so the research platform keeps working.
+  *product/scientific* choice for the **owner alone** — as of 2026-06-28 the project is no
+  longer anchored to UiO, so there is no advisor meeting to wait for. Don't pick a side;
+  surface the tradeoff and let Karthik decide. See `RETENTION_SCHEDULE_DECISION.md`. The
+  flashcard mapping must use whatever `config.CHECK_TYPE_KEYS` holds.
+- **Consumer app: new `app/` folder vs restyle `frontend/`** — resolved; `app/` was built as
+  a separate folder (see §9, 2026-06-18) and is the active consumer product.
 
 ## A.9 Recover / run everything from scratch
 

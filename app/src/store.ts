@@ -28,6 +28,8 @@ export interface AppState {
   recents: RecentMaterial[];
   /** When the forgetting-nudge was last dismissed (rate-limits it to ~6h). */
   nudgeDismissedAt: number | null;
+  /** #9 study-buddy: a friend's share code we're following (their forecast). */
+  buddyCode: string | null;
 }
 
 const EMPTY: AppState = {
@@ -39,6 +41,7 @@ const EMPTY: AppState = {
   lastMaterialText: null,
   recents: [],
   nudgeDismissedAt: null,
+  buddyCode: null,
 };
 
 export function getState(): AppState {

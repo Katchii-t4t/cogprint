@@ -12,7 +12,18 @@ import Timer from "../components/Timer";
 export default function Study() {
   const [params] = useSearchParams();
   const materialId = params.get("m") ? Number(params.get("m")) : storedMaterialId();
+  // Carried from the Plan ModePicker so the round logs the honest technique.
+  const mode = params.get("mode");
   const navigate = useNavigate();
+
+  // Build the round URL, preserving both the material and the chosen mode.
+  const cardsUrl = (() => {
+    const q = new URLSearchParams();
+    if (materialId) q.set("m", String(materialId));
+    if (mode) q.set("mode", mode);
+    const s = q.toString();
+    return s ? `/cards?${s}` : "/cards";
+  })();
   const { lastMaterialText, lastMaterialTitle } = getState();
   const [awake, setAwake] = useState(false);
 
@@ -57,7 +68,7 @@ export default function Study() {
           focus interval. Tapping it (in either state) goes to flashcards;
           the user is never forced there. */}
       <button
-        onClick={() => navigate(materialId ? `/cards?m=${materialId}` : "/cards")}
+        onClick={() => navigate(cardsUrl)}
         className={`fixed bottom-6 right-5 w-14 h-14 rounded-full flex items-center justify-center
                     transition-all duration-300 active:scale-90 ${
                       awake
