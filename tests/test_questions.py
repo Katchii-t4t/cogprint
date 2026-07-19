@@ -16,12 +16,25 @@ def _make_material(client):
     return r.json()["material_id"]
 
 
-def test_questions_unavailable_without_key_returns_503(client, monkeypatch):
+def test_questions_without_key_falls_back_to_local_cloze(client, monkeypatch):
+    """No API key → the endpoint serves zero-LLM cloze cards instead of 503 (§2.4)."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     mid = _make_material(client)
     r = client.post(f"/materials/{mid}/questions")
-    assert r.status_code == 503
-    assert "ANTHROPIC_API_KEY" in r.json()["detail"]
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["generated_by"] == "local:cloze"
+    assert len(body["cards"]) > 0
+
+
+def test_free_mode_forces_local_even_with_key(client, monkeypatch):
+    """COGPRINT_MODE=free uses the local generator even if a key is present."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-not-used")
+    monkeypatch.setenv("COGPRINT_MODE", "free")
+    mid = _make_material(client)
+    r = client.post(f"/materials/{mid}/questions")
+    assert r.status_code == 200, r.text
+    assert r.json()["generated_by"] == "local:cloze"
 
 
 def test_questions_happy_path_and_cache(client, monkeypatch):

@@ -400,21 +400,39 @@ def generate_questions(
             generated_by="cache",
         )
 
-    try:
-        generated = generate_flashcards(material.title, material.raw_text, n=n)
-    except QuestionGenUnavailable as e:
-        raise HTTPException(status_code=503, detail=str(e))
+    # LLM cards when a key is configured (premium); otherwise fall back to the
+    # zero-LLM cloze generator (§2.4) so flashcards ALWAYS work — no dead 503,
+    # no cost, offline. COGPRINT_MODE=free forces the local path even with a key.
+    mode = os.getenv("COGPRINT_MODE", "hybrid").lower()
+    used_llm = False
+    if mode != "free":
+        try:
+            generated = generate_flashcards(material.title, material.raw_text, n=n)
+            used_llm = True
+        except QuestionGenUnavailable:
+            generated = None
+    else:
+        generated = None
+
+    if generated is None:
+        from agents.question_generator_local import (
+            generate_flashcards as generate_flashcards_local,
+        )
+        generated = generate_flashcards_local(material.title, material.raw_text, n=n)
 
     stored = StoredQuestions(cards=generated.cards, flagged=[])
     material.questions_json = stored.model_dump_json()
     db.commit()
 
-    model_used = os.getenv("COGPRINT_QGEN_MODEL", "claude-opus-4-8")
+    if used_llm:
+        generated_by = f"llm:{os.getenv('COGPRINT_QGEN_MODEL', 'claude-opus-4-8')}"
+    else:
+        generated_by = "local:cloze"
     return QuestionSetResponse(
         material_id=material.id,
         title=material.title,
         cards=_cards_out(stored, include_flagged),
-        generated_by=f"llm:{model_used}",
+        generated_by=generated_by,
     )
 
 
