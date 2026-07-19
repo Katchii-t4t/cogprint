@@ -1,6 +1,7 @@
 import csv
 import io
 import json
+import logging
 import os
 from datetime import datetime, timedelta
 from typing import List, Optional
@@ -48,6 +49,8 @@ from schemas.session import (
     UserResponse,
 )
 
+logger = logging.getLogger("cogprint")
+
 app = FastAPI(title="CogPrint API", version="0.1.0")
 
 # CORS origins are configurable so the deployed research frontend can talk to the
@@ -75,20 +78,45 @@ def startup():
     init_db()
 
 
+def _record_rebuild_status(
+    db: Session, user_id: int, status: str, error: Optional[str] = None
+) -> None:
+    """Stamp the outcome of a rebuild onto the user's fingerprint row so a failed
+    rebuild is observable (§4.2) instead of silently leaving a stale profile.
+    Creates a placeholder row if the rebuild failed before one existed."""
+    fp = db.query(CognitiveFingerprint).filter_by(user_id=user_id).first()
+    if fp is None:
+        fp = CognitiveFingerprint(user_id=user_id, session_count=0)
+        db.add(fp)
+    fp.last_rebuild_status = status
+    fp.last_rebuild_at = utcnow()
+    fp.last_rebuild_error = (error or None) and error[:500]
+    db.commit()
+
+
 def _rebuild_fingerprint_bg(user_id: int) -> None:
     """Rebuild a user's fingerprint in a background task.
 
     Runs *after* the HTTP response is sent, so logging a session/retention
     check returns immediately instead of blocking on the full MCMC pipeline.
     The request-scoped DB session is already closed by the time this fires,
-    so we open our own and always close it. Failures are swallowed: a failed
-    rebuild must never surface as a failed data-logging request.
+    so we open our own and always close it.
+
+    A failed rebuild must never surface as a failed data-logging request — but
+    it must not vanish either. On failure we log it and stamp last_rebuild_status
+    on the fingerprint row so the staleness is visible to the user and to ops.
     """
     db = SessionLocal()
     try:
         rebuild_fingerprint(db, user_id)
-    except Exception:
-        pass
+        _record_rebuild_status(db, user_id, "ok")
+    except Exception as e:  # noqa: BLE001 — must not propagate to the request
+        logger.exception("fingerprint rebuild failed for user %s", user_id)
+        try:
+            db.rollback()
+            _record_rebuild_status(db, user_id, "failed", repr(e))
+        except Exception:  # noqa: BLE001 — status write is best-effort
+            logger.exception("failed to record rebuild status for user %s", user_id)
     finally:
         db.close()
 
@@ -249,7 +277,9 @@ def get_fingerprint(user_id: int, db: Session = Depends(get_db)):
     fp = db.query(CognitiveFingerprint).filter_by(user_id=user_id).first()
 
     if not fp or not fp.profile_json:
-        # No data yet — return a generic empty fingerprint
+        # No usable profile yet — return a generic empty fingerprint, but still
+        # surface rebuild status so a failed first rebuild (row exists, no
+        # profile) is detectable rather than looking like "no data yet".
         profile = FingerprintProfile(
             session_count=0,
             confidence=ConfidenceLevel.LOW,
@@ -259,29 +289,45 @@ def get_fingerprint(user_id: int, db: Session = Depends(get_db)):
             user_id=user_id,
             fingerprint=profile,
             updated_at=utcnow(),
+            rebuild_status=fp.last_rebuild_status if fp else None,
+            rebuild_at=fp.last_rebuild_at if fp else None,
         )
 
     return FingerprintResponse(
         user_id=user_id,
         fingerprint=load_profile(fp),
         updated_at=fp.updated_at,
+        rebuild_status=fp.last_rebuild_status,
+        rebuild_at=fp.last_rebuild_at,
     )
 
 
 @app.post("/users/{user_id}/fingerprint/rebuild", response_model=FingerprintResponse)
 def force_rebuild_fingerprint(user_id: int, db: Session = Depends(get_db)):
-    """Manually trigger a fingerprint rebuild — useful after bulk data import."""
+    """Manually trigger a fingerprint rebuild ("rebuild now", §4.2) — useful after
+    bulk import or to recover from a failed background rebuild. Unlike the
+    background path this runs synchronously so the caller sees the outcome; a
+    genuine failure surfaces as a 500 (and is stamped on the row)."""
     user = db.query(User).filter_by(id=user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    profile = rebuild_fingerprint(db, user_id)
-    fp = db.query(CognitiveFingerprint).filter_by(user_id=user_id).first()
+    try:
+        profile = rebuild_fingerprint(db, user_id)
+        _record_rebuild_status(db, user_id, "ok")
+    except Exception as e:  # noqa: BLE001
+        logger.exception("manual fingerprint rebuild failed for user %s", user_id)
+        db.rollback()
+        _record_rebuild_status(db, user_id, "failed", repr(e))
+        raise HTTPException(status_code=500, detail="Rebuild failed; status recorded.")
 
+    fp = db.query(CognitiveFingerprint).filter_by(user_id=user_id).first()
     return FingerprintResponse(
         user_id=user_id,
         fingerprint=profile,
         updated_at=fp.updated_at if fp else utcnow(),
+        rebuild_status=fp.last_rebuild_status if fp else "ok",
+        rebuild_at=fp.last_rebuild_at if fp else utcnow(),
     )
 
 

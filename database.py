@@ -135,6 +135,13 @@ class CognitiveFingerprint(Base):
     profile_json = Column(Text, nullable=True)      # serialized FingerprintProfile
     bandit_state_json = Column(Text, nullable=True)  # serialized LinUCBRecommender
 
+    # Observability (§4.2): the rebuild runs as a fire-and-forget background task;
+    # without this, a failed rebuild silently leaves a stale profile with no signal.
+    # "ok" | "failed" | "pending" (None on rows that predate this column).
+    last_rebuild_status = Column(String(16), nullable=True)
+    last_rebuild_at = Column(DateTime, nullable=True)
+    last_rebuild_error = Column(Text, nullable=True)  # truncated message, ops-only
+
     user = relationship("User", back_populates="fingerprint")
 
 

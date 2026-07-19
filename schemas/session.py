@@ -111,6 +111,10 @@ class FingerprintResponse(BaseModel):
     user_id: int
     fingerprint: FingerprintProfile
     updated_at: datetime
+    # Observability (§4.2): surfaces whether the last background rebuild succeeded
+    # so a silently-stale fingerprint is detectable. None until the first rebuild.
+    rebuild_status: Optional[str] = None      # "ok" | "failed" | "pending"
+    rebuild_at: Optional[datetime] = None
 
 
 class StudyPlanDay(BaseModel):
