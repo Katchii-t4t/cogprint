@@ -50,6 +50,7 @@ import math
 from collections import defaultdict
 from typing import Optional
 
+from personalization.priors import prior_effectiveness
 from schemas.fingerprint import FingerprintProfile
 from schemas.session import KnowledgeMap, MaterialProfile, StudyPlanDay, StudyPlanResponse
 
@@ -105,9 +106,17 @@ def _best_technique(fp: FingerprintProfile) -> str:
 def _technique_effectiveness_map(fp: FingerprintProfile) -> dict[str, float]:
     """
     Build a dict mapping technique → expected retention multiplier [0, 1].
-    Default = 0.70 (rough prior for an untested technique).
+    Untested techniques default to the research prior (Dunlosky 2013 et al.,
+    see personalization/priors.py) instead of a flat constant — so cold-start
+    recommendations are differentiated and research-defensible from session 0.
     """
-    m: dict[str, float] = defaultdict(lambda: 0.70)
+    m: dict[str, float] = {
+        tech: prior_effectiveness(tech)
+        for tech in (
+            "practice_testing", "spaced_repetition", "active_recall",
+            "elaborative_interrogation", "interleaving", "mind_maps", "re_reading",
+        )
+    }
     for t in fp.technique_effectiveness:
         eff = t.avg_retention_7d or t.avg_retention_24h or t.avg_immediate_score
         if eff is not None:
@@ -193,11 +202,13 @@ def _technique_for_concept(
 
     - material_fit comes from the concept's (difficulty × type) context (Dunlosky).
     - learner_effectiveness comes from the fingerprint (measured 7d retention),
-      defaulting to a flat 0.70 prior for techniques with no data yet.
+      defaulting to the research prior (personalization/priors.py) for
+      techniques with no data yet.
 
-    Cold start (no measured data): every effectiveness ≈ 0.70, so the material
-    signal decides — the text drives the recommendation. As retention data
-    accrues, effectiveness differentiates and personalises the pick. Crucially,
+    Cold start (no measured data): the pick is material_fit × research prior —
+    the text's shape and the literature's technique ranking decide together,
+    honestly, from session zero. As retention data accrues, the personal
+    posterior replaces the prior and personalises the pick. Crucially,
     the learner's global-best technique no longer auto-wins just by appearing in
     the candidate list (the old behaviour, which flattened everything toward one
     technique) — it only wins where the material also supports it, or where the
@@ -207,7 +218,7 @@ def _technique_for_concept(
     techniques = set(mat_w) | set(eff_map) | {best_overall}
 
     def score(tech: str) -> tuple[float, bool, str]:
-        s = mat_w.get(tech, _MATERIAL_FLOOR) * eff_map.get(tech, 0.70)
+        s = mat_w.get(tech, _MATERIAL_FLOOR) * eff_map.get(tech, prior_effectiveness(tech))
         # Deterministic tie-break: prefer the learner's global best, then name.
         return (s, tech == best_overall, tech)
 
@@ -243,7 +254,7 @@ def _priority(
     lag  = current_day - last
     S    = stabilities.get(concept, _DEFAULT_S)
     R    = _retention(lag, S)
-    eff  = eff_map.get(technique, 0.70)
+    eff  = eff_map.get(technique, prior_effectiveness(technique))
     return (1.0 - R) * eff
 
 

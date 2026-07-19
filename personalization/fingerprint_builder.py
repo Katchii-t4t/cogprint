@@ -32,6 +32,7 @@ from sqlalchemy.orm import Session
 from database import CognitiveFingerprint, RetentionCheck, StudyGroup, StudySession, User, utcnow
 from personalization.forgetting_curve import compute_memory_profiles
 from personalization.hierarchical_memory import HierarchicalMemoryModel
+from personalization.priors import prior_stability_days
 from personalization.linucb import (
     ALL_TECHNIQUES,
     LinUCBRecommender,
@@ -289,6 +290,12 @@ def _compute_bayesian_stability(
 
     results: list[BayesianStabilityStats] = []
     for technique, obs in tech_obs.items():
+        # Cold start (§2.1): until Empirical Bayes has a real cohort to fit,
+        # centre each technique's stability prior at the literature-implied
+        # value (Dunlosky 2013 ranking) instead of one global default — so a
+        # brand-new user's posterior is differentiated and research-grounded.
+        if not model.population_fitted:
+            model.pop.log_mean = math.log(prior_stability_days(technique))
         summary = model.fit_user(obs)
         results.append(BayesianStabilityStats(
             technique             = technique,

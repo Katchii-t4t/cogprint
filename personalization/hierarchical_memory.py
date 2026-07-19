@@ -97,6 +97,11 @@ class HierarchicalMemoryModel:
 
     def __init__(self, pop: Optional[PopulationParams] = None) -> None:
         self.pop = pop or PopulationParams()
+        # True once fit_population() succeeds on real cohort data. While False,
+        # callers may seed self.pop with research-derived per-technique priors
+        # (personalization/priors.py) — Empirical Bayes from the actual cohort
+        # always takes precedence once available.
+        self.population_fitted = False
 
     # ── Population fitting ─────────────────────────────────────────────────────
 
@@ -120,6 +125,7 @@ class HierarchicalMemoryModel:
         self.pop.log_mean = float(np.mean(log_s))
         # Floor on log_std prevents a degenerate prior that over-shrinks
         self.pop.log_std  = max(0.15, float(np.std(log_s)))
+        self.population_fitted = True
 
     # ── Log-probability components ─────────────────────────────────────────────
 
