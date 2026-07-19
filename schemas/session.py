@@ -178,6 +178,26 @@ class ReviewSuggestion(BaseModel):
     fading: bool                # predicted_retention < FADING_THRESHOLD
 
 
+# --- Material library (§3.3) ---
+
+class MaterialLibraryItem(BaseModel):
+    """One material in a user's library — everything the returning-user home
+    needs to browse, resume, and prioritise decks. Derived from the user's own
+    sessions (materials aren't user-owned in the schema; the link is the
+    sessions), enriched with the same Ebbinghaus forgetting state as the
+    review-suggestions nudge so 'what needs review' is consistent across the app."""
+
+    material_id: int
+    title: str
+    created_at: datetime
+    last_studied: datetime
+    session_count: int
+    concept_count: int
+    predicted_retention: float  # R(t) = exp(-t/S), 0..1 (most-recent technique)
+    fading: bool                # predicted_retention < FADING_THRESHOLD
+    reviews_due: int            # pending 24h/7d checks across this material's sessions
+
+
 # --- Research export ---
 
 class ResearchExportRow(BaseModel):

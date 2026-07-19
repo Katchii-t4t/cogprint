@@ -33,6 +33,7 @@ from schemas.session import (
     FingerprintResponse,
     MaterialAnalysisResponse,
     MaterialCreate,
+    MaterialLibraryItem,
     OcrRequest,
     OcrResponse,
     PostTestUpdate,
@@ -659,6 +660,99 @@ def get_review_suggestions(user_id: int, db: Session = Depends(get_db)):
         ))
 
     items.sort(key=lambda x: x.predicted_retention)
+    return items
+
+
+# ---------------------------------------------------------------------------
+# Material library (§3.3) — the returning-user home
+# ---------------------------------------------------------------------------
+
+@app.get("/users/{user_id}/materials", response_model=List[MaterialLibraryItem])
+def get_material_library(user_id: int, db: Session = Depends(get_db)):
+    """Every material this user has studied, newest-studied first, each with its
+    concept count, how many times it's been studied, its Ebbinghaus forgetting
+    state, and how many retention checks are due.
+
+    Materials aren't user-owned in the schema, so the library is derived from the
+    user's own sessions (the durable server-side signal). This is the backend
+    home screen the localStorage 'recents' can't be: cross-device and review-aware.
+    """
+    from personalization.review import (
+        DEFAULT_STABILITY_DAYS,
+        FADING_THRESHOLD,
+        predicted_retention,
+    )
+
+    user = db.query(User).filter_by(id=user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    sessions = (
+        db.query(StudySession)
+        .filter(StudySession.user_id == user_id, StudySession.material_id.isnot(None))
+        .all()
+    )
+    if not sessions:
+        return []
+
+    # Personalised stability by technique from the user's own fingerprint.
+    stability_by_tech: dict[str, float] = {}
+    fp = db.query(CognitiveFingerprint).filter_by(user_id=user_id).first()
+    if fp and fp.profile_json:
+        for m in load_profile(fp).memory_profiles:
+            stability_by_tech[m.technique] = m.avg_stability_days
+
+    # Pending-check lookup: which (session_id, check_type) are already done.
+    session_ids = [s.id for s in sessions]
+    done_checks: set[tuple[int, str]] = set()
+    for rc in db.query(RetentionCheck).filter(RetentionCheck.session_id.in_(session_ids)).all():
+        done_checks.add((rc.session_id, rc.check_type))
+
+    now = utcnow()
+
+    # Aggregate per material.
+    agg: dict[int, dict] = {}
+    for s in sessions:
+        a = agg.setdefault(s.material_id, {"count": 0, "latest": s, "reviews_due": 0})
+        a["count"] += 1
+        if s.created_at > a["latest"].created_at:
+            a["latest"] = s
+        for cp in RETENTION_SCHEDULE:
+            due = s.created_at + cp.delay
+            if now >= due and (s.id, cp.key) not in done_checks:
+                a["reviews_due"] += 1
+
+    items: list[MaterialLibraryItem] = []
+    for material_id, a in agg.items():
+        material = db.query(Material).filter_by(id=material_id).first()
+        if not material:
+            continue
+        latest = a["latest"]
+        days = max(0.0, (now - latest.created_at).total_seconds() / 86400.0)
+        technique = latest.technique.value if hasattr(latest.technique, "value") else str(latest.technique)
+        stability = stability_by_tech.get(technique, DEFAULT_STABILITY_DAYS)
+        r = predicted_retention(days, stability)
+
+        concept_count = 0
+        if material.knowledge_map_json:
+            try:
+                concept_count = int(json.loads(material.knowledge_map_json).get("total_concepts", 0))
+            except (ValueError, TypeError):
+                concept_count = 0
+
+        items.append(MaterialLibraryItem(
+            material_id=material_id,
+            title=material.title,
+            created_at=material.created_at,
+            last_studied=latest.created_at,
+            session_count=a["count"],
+            concept_count=concept_count,
+            predicted_retention=round(r, 4),
+            fading=r < FADING_THRESHOLD,
+            reviews_due=a["reviews_due"],
+        ))
+
+    items.sort(key=lambda x: x.last_studied, reverse=True)
     return items
 
 
