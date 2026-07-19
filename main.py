@@ -520,8 +520,16 @@ def generate_study_plan(
     user_id: int,
     material_id: int,
     total_days: int = 14,
+    target_date: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
+    """Generate (or re-generate) a study plan for a material.
+
+    Adaptive (§3.3): if the user has studied this material before, the plan
+    resumes from today (concepts treated as decayed reviews) instead of
+    restarting. Pass ?target_date=YYYY-MM-DD (e.g. an exam date) to size the
+    horizon instead of the default 14 days.
+    """
     from agents.study_planner import StudyPlanner
     from schemas.session import KnowledgeMap
 
@@ -536,13 +544,37 @@ def generate_study_plan(
             detail="Material not found or not yet analyzed. POST /materials/analyze first.",
         )
 
+    # Horizon from an exam date, if given (clamped to a sane 1..90 days).
+    if target_date:
+        try:
+            exam = datetime.fromisoformat(target_date).date()
+        except ValueError:
+            raise HTTPException(status_code=422, detail="target_date must be ISO YYYY-MM-DD")
+        total_days = max(1, min(90, (exam - utcnow().date()).days))
+
+    # Adaptive resume state: prior sessions on THIS material and recency.
+    material_sessions = (
+        db.query(StudySession)
+        .filter(StudySession.user_id == user_id, StudySession.material_id == material_id)
+        .all()
+    )
+    prior_sessions = len(material_sessions)
+    days_since_last_study: Optional[float] = None
+    if material_sessions:
+        last = max(s.created_at for s in material_sessions)
+        days_since_last_study = max(0.0, (utcnow() - last).total_seconds() / 86400.0)
+
     knowledge_map = KnowledgeMap.model_validate_json(material.knowledge_map_json)
 
     fp = db.query(CognitiveFingerprint).filter_by(user_id=user_id).first()
     fingerprint = load_profile(fp) if fp and fp.profile_json else FingerprintProfile(session_count=0)
 
     planner = StudyPlanner()
-    return planner.generate_plan(user_id, knowledge_map, fingerprint, total_days)
+    return planner.generate_plan(
+        user_id, knowledge_map, fingerprint, total_days,
+        days_since_last_study=days_since_last_study,
+        prior_sessions=prior_sessions,
+    )
 
 
 # ---------------------------------------------------------------------------

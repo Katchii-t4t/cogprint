@@ -341,6 +341,8 @@ class StudyPlanner:
         knowledge_map: KnowledgeMap,
         fingerprint:   FingerprintProfile,
         total_days:    int = 14,
+        days_since_last_study: Optional[float] = None,
+        prior_sessions: int = 0,
     ) -> StudyPlanResponse:
         """
         Generate a personalised study plan.
@@ -350,7 +352,13 @@ class StudyPlanner:
         user_id       : DB user identifier
         knowledge_map : extracted concept graph from Agent 1
         fingerprint   : cognitive fingerprint from Agent 2 (may be low-confidence)
-        total_days    : planning horizon in days
+        total_days    : planning horizon in days (e.g. derived from an exam date)
+        days_since_last_study : if the user has studied this material before, how
+            many days ago the most recent session was — enables adaptive resume.
+        prior_sessions : number of prior sessions on this material. >0 switches the
+            plan from "introduce everything fresh" to "resume": concepts are
+            treated as already-encoded but decayed, so day 1 front-loads whatever
+            is fading instead of re-teaching from scratch (§3.3).
 
         Returns
         -------
@@ -399,6 +407,20 @@ class StudyPlanner:
         next_review:    dict[str, int] = {}    # concept → earliest day for next review
         seen:           set[str]       = set() # concepts introduced so far
         introduction_queue = list(ordered_concepts)  # FIFO: introduce in study order
+
+        # Adaptive resume (§3.3): if the user has studied this material before,
+        # don't re-introduce everything from scratch. Treat every concept as
+        # already-encoded `days_since_last_study` days ago, so day 1's review
+        # scoring — (1 − R(lag)) × effectiveness — front-loads whatever is
+        # fading most. New introductions are skipped (the queue is drained).
+        resuming = prior_sessions > 0
+        if resuming:
+            lag0 = int(round(days_since_last_study or 0.0))
+            for c in ordered_concepts:
+                seen.add(c.concept)
+                last_studied[c.concept] = -lag0   # studied lag0 days before day 0
+                next_review[c.concept] = 0        # all eligible for review on day 1
+            introduction_queue = []               # nothing new to introduce
 
         plan_days: list[StudyPlanDay] = []
 
@@ -512,8 +534,17 @@ class StudyPlanner:
         # The material profile drives material-aware surfacing and leads the
         # advice so the learner sees WHY these techniques were chosen for THIS text.
         material_profile = _material_profile(knowledge_map)
+        resume_note = ""
+        if resuming:
+            gap = int(round(days_since_last_study or 0.0))
+            resume_note = (
+                f"Resuming: you last studied this {gap} day{'s' if gap != 1 else ''} ago. "
+                "This plan picks up from today and front-loads whatever is fading most, "
+                "rather than restarting from scratch.  "
+            )
         general_advice = (
-            material_profile.summary
+            resume_note
+            + material_profile.summary
             + "  "
             + _build_general_advice(fingerprint, confidence, total_days)
         )
