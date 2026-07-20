@@ -182,29 +182,65 @@ class HierarchicalMemoryModel:
 
           α = min(1, p(S_new | data) / p(S_curr | data))
 
+        Implementation notes (same math as _log_posterior, restated inline):
+          * The current state's log-posterior is carried across iterations,
+            so each step evaluates the posterior once (for the proposal)
+            instead of twice.
+          * All proposal/uniform draws are generated in one batch up front —
+            per-step RNG calls dominate otherwise.
+          * The likelihood loops over plain Python tuples for the small
+            observation counts typical here (a session contributes ≤ 2
+            points); NumPy's per-call overhead only pays off once the
+            observation list is large, so big lists switch to array math.
+
         Returns array of posterior samples (burn-in already discarded).
         """
-        rng   = np.random.default_rng()
-        S_cur = math.exp(self.pop.log_mean)   # initialise at prior mean
-        samples: list[float] = []
+        rng     = np.random.default_rng()
+        n_steps = _BURN_IN + _N_SAMPLES
 
-        for step in range(_BURN_IN + _N_SAMPLES):
-            # Propose
-            log_S_prop = math.log(S_cur) + rng.normal(0.0, _PROPOSAL_STD)
-            S_prop     = math.exp(log_S_prop)
+        mu, sigma      = self.pop.log_mean, self.pop.log_std
+        inv_two_var    = 1.0 / (2.0 * sigma * sigma)
+        inv_noise_var  = 1.0 / (_SIGMA_NOISE * _SIGMA_NOISE)
 
-            # Metropolis accept/reject
-            log_accept = (
-                self._log_posterior(S_prop, obs)
-                - self._log_posterior(S_cur, obs)
-            )
-            if math.log(rng.uniform()) < log_accept:
-                S_cur = S_prop
+        if len(obs) <= 24:
+            obs_t = tuple(obs)
+
+            def log_post(S: float) -> float:
+                log_s = math.log(S)
+                lp    = -log_s - (log_s - mu) ** 2 * inv_two_var
+                acc   = 0.0
+                for t, R in obs_t:
+                    d = R - math.exp(-t / S)
+                    acc += d * d
+                return lp - 0.5 * acc * inv_noise_var
+        else:
+            t_arr = np.array([t for t, _ in obs], dtype=float)
+            r_arr = np.array([R for _, R in obs], dtype=float)
+
+            def log_post(S: float) -> float:
+                log_s = math.log(S)
+                lp    = -log_s - (log_s - mu) ** 2 * inv_two_var
+                resid = r_arr - np.exp(-t_arr / S)
+                return lp - 0.5 * float(resid @ resid) * inv_noise_var
+
+        eps    = rng.normal(0.0, _PROPOSAL_STD, n_steps).tolist()
+        log_u  = np.log(rng.uniform(size=n_steps)).tolist()
+
+        S_cur  = math.exp(mu)   # initialise at prior mean
+        lp_cur = log_post(S_cur)
+        samples = np.empty(_N_SAMPLES, dtype=float)
+
+        for step in range(n_steps):
+            S_prop  = S_cur * math.exp(eps[step])
+            lp_prop = log_post(S_prop)
+
+            if log_u[step] < lp_prop - lp_cur:
+                S_cur, lp_cur = S_prop, lp_prop
 
             if step >= _BURN_IN:
-                samples.append(S_cur)
+                samples[step - _BURN_IN] = S_cur
 
-        return np.array(samples, dtype=float)
+        return samples
 
     # ── Public API ─────────────────────────────────────────────────────────────
 

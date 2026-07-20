@@ -22,6 +22,7 @@ Pipeline:
 
 from __future__ import annotations
 
+import json
 import math
 from collections import defaultdict
 from datetime import datetime
@@ -238,18 +239,22 @@ def _get_population_estimates(db: Session) -> list[float]:
 
     Returns a flat list of per-technique S values across all users.
     """
-    all_fps = (
-        db.query(CognitiveFingerprint)
+    # Column-only query + raw json.loads: this runs on EVERY rebuild (i.e.
+    # every session/retention POST) over every user's stored profile, so we
+    # skip ORM row construction and full pydantic validation — only the
+    # memory_profiles stability values are needed here.
+    rows = (
+        db.query(CognitiveFingerprint.profile_json)
         .filter(CognitiveFingerprint.profile_json.isnot(None))
         .all()
     )
     s_values: list[float] = []
-    for fp in all_fps:
+    for (profile_json,) in rows:
         try:
-            profile = FingerprintProfile.model_validate_json(fp.profile_json)
-            for mp in profile.memory_profiles:
-                if mp.avg_stability_days > 0:
-                    s_values.append(mp.avg_stability_days)
+            for mp in json.loads(profile_json).get("memory_profiles", []):
+                s = mp.get("avg_stability_days")
+                if s is not None and s > 0:
+                    s_values.append(float(s))
         except Exception:
             continue
     return s_values
