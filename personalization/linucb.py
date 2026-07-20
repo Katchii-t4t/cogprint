@@ -290,10 +290,14 @@ class LinUCBRecommender:
         x      = context.reshape(-1)
         scores = {}
         for k in self.techniques:
-            A_inv  = np.linalg.inv(self._A[k])
-            theta  = A_inv @ self._b[k]
+            # Solve A [θ | A⁻¹x] = [b | x] in one call — A is symmetric
+            # positive-definite (I + Σxxᵀ), so solve is both faster and
+            # numerically better-conditioned than forming A⁻¹ explicitly.
+            sol     = np.linalg.solve(self._A[k], np.column_stack((self._b[k], x)))
+            theta   = sol[:, 0]
+            A_inv_x = sol[:, 1]
             exploit = float(theta @ x)
-            explore = float(self.alpha * math.sqrt(max(0.0, x @ A_inv @ x)))
+            explore = float(self.alpha * math.sqrt(max(0.0, x @ A_inv_x)))
             scores[k] = exploit + explore
         return scores
 
@@ -328,7 +332,7 @@ class LinUCBRecommender:
         x = (_NEUTRAL_CONTEXT if context is None else context).reshape(-1)
         rewards = {}
         for k in self.techniques:
-            theta     = np.linalg.inv(self._A[k]) @ self._b[k]
+            theta      = np.linalg.solve(self._A[k], self._b[k])
             rewards[k] = float(theta @ x)
         return rewards
 
