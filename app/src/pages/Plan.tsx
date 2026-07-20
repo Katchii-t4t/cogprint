@@ -98,6 +98,10 @@ export default function Plan() {
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 pb-32">
+        {/* Material DNA (§2.2) — the cognitive shape of THIS text, visually.
+            The advice sentence above says why; this shows the mix itself. */}
+        {plan.material_profile && <MaterialDna profile={plan.material_profile} />}
+
         {/* Pending checks banner */}
         {pending.length > 0 && (
           <div
@@ -217,6 +221,56 @@ function DayCard({
           <p className="text-slate-400 text-xs leading-relaxed">{day.rationale}</p>
         </div>
       )}
+    </div>
+  );
+}
+
+/** In-palette tones for the three concept types — no colors outside the system. */
+const TYPE_TONES: Record<string, { bar: string; text: string; label: string }> = {
+  factual:    { bar: "bg-neural",      text: "text-neural",    label: "factual" },
+  conceptual: { bar: "bg-neural-dim",  text: "text-cyan-500",  label: "conceptual" },
+  procedural: { bar: "bg-slate-500",   text: "text-slate-400", label: "procedural" },
+};
+
+function MaterialDna({ profile }: { profile: import("../types").MaterialProfile }) {
+  const entries = Object.entries(profile.type_mix)
+    .filter(([, v]) => v > 0)
+    .sort((a, b) => b[1] - a[1]);
+  if (entries.length === 0) return null;
+
+  return (
+    <div className="rounded-2xl bg-ink-700 neural-border p-4 animate-fade-up">
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-slate-500 text-[10px] font-medium uppercase tracking-widest">
+          Material profile
+        </p>
+        <span className="text-[10px] px-2 py-0.5 rounded-full bg-ink-500/60 text-slate-300">
+          {profile.dominant_difficulty}
+        </span>
+      </div>
+
+      {/* Segmented type-mix bar */}
+      <div className="h-2 rounded-full overflow-hidden flex bg-ink-500" role="img"
+           aria-label={`Concept mix: ${entries.map(([k, v]) => `${Math.round(v * 100)}% ${k}`).join(", ")}`}>
+        {entries.map(([k, v]) => (
+          <div
+            key={k}
+            className={`${TYPE_TONES[k]?.bar ?? "bg-slate-600"} h-full transition-all duration-700`}
+            style={{ width: `${Math.max(4, v * 100)}%` }}
+          />
+        ))}
+      </div>
+
+      {/* Legend */}
+      <div className="flex gap-4 mt-2.5">
+        {entries.map(([k, v]) => (
+          <span key={k} className="flex items-center gap-1.5 text-[10px] text-slate-400">
+            <span className={`w-2 h-2 rounded-full ${TYPE_TONES[k]?.bar ?? "bg-slate-600"}`} aria-hidden="true" />
+            <span className={TYPE_TONES[k]?.text}>{Math.round(v * 100)}%</span>
+            {TYPE_TONES[k]?.label ?? k}
+          </span>
+        ))}
+      </div>
     </div>
   );
 }

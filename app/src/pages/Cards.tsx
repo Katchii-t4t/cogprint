@@ -65,6 +65,9 @@ export default function Cards() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [needsSetup, setNeedsSetup] = useState(false);
+  /** Where the cards came from ("local:cloze" | "llm:<model>" | "cache") — §2.4
+      transparency: offline science-mode cards are a feature, so say so. */
+  const [source, setSource] = useState("");
   const [swipeX, setSwipeX] = useState(0);
   const [logging, setLogging] = useState(false);
 
@@ -89,6 +92,7 @@ export default function Cards() {
       .then((r) => {
         const active = r.cards.filter((c) => !c.flagged);
         setCards(active);
+        setSource(r.generated_by);
         // Shuffle each card's options once per round (in the effect, not in
         // render, so the order is stable and the render stays pure).
         const opts: Record<number, string[]> = {};
@@ -286,6 +290,11 @@ export default function Cards() {
         </div>
         {mode === "flash" && (
           <span className="text-slate-600 text-[10px]">Practice — not scored</span>
+        )}
+        {source === "local:cloze" && (
+          <span className="text-slate-600 text-[10px]">
+            🧬 Offline science mode — cards built from your text, no AI needed
+          </span>
         )}
       </div>
 

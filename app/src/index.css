@@ -65,3 +65,24 @@
   .orbit-1 { animation: orbit 3.2s linear infinite; }
   .orbit-2 { animation: orbit 5s linear infinite reverse; }
 }
+
+/* a11y (§6): respect the user's motion preference — decorative motion becomes
+   static, entrances become instant. Content is never hidden by this. */
+@media (prefers-reduced-motion: reduce) {
+  .breathe,
+  .orbit-1,
+  .orbit-2,
+  .animate-pulse,
+  .animate-ping,
+  .animate-spin {
+    animation: none !important;
+  }
+  .animate-fade-up,
+  .animate-fade-in,
+  .card-swipe-enter {
+    animation-duration: 0.01ms !important;
+  }
+  * {
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -155,3 +155,26 @@ def get_db():
 
 def init_db():
     Base.metadata.create_all(bind=engine)
+    _migrate_add_missing_columns()
+
+
+def _migrate_add_missing_columns():
+    """Pragmatic pre-Alembic migration: `create_all` never ALTERs existing
+    tables, so a DB created before a column was added silently breaks every
+    query touching the model. Until Postgres+Alembic land (§4.2), add any
+    missing declared columns with ADD COLUMN (nullable ⇒ safe + idempotent)."""
+    from sqlalchemy import inspect as sa_inspect, text
+
+    inspector = sa_inspect(engine)
+    with engine.begin() as conn:
+        for table in Base.metadata.sorted_tables:
+            if not inspector.has_table(table.name):
+                continue
+            existing = {c["name"] for c in inspector.get_columns(table.name)}
+            for col in table.columns:
+                if col.name in existing or not col.nullable:
+                    continue  # non-nullable additions need a real migration
+                coltype = col.type.compile(engine.dialect)
+                conn.execute(text(
+                    f'ALTER TABLE {table.name} ADD COLUMN "{col.name}" {coltype}'
+                ))

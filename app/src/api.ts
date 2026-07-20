@@ -13,6 +13,7 @@ import type {
   RetentionCheck,
   ShareCodeResponse,
   BuddyForecast,
+  MaterialLibraryItem,
 } from "./types";
 
 const BASE = import.meta.env.VITE_API_BASE ?? "/api";
@@ -105,6 +106,14 @@ export const api = {
     }),
 
   getUser: (userId: number) => req<User>(`/users/${userId}`),
+
+  // §3.3 material library — every deck the user has studied, review-aware.
+  getLibrary: (userId: number) =>
+    req<MaterialLibraryItem[]>(`/users/${userId}/materials`),
+
+  // §4.2 "rebuild now" — synchronous recovery from a failed background rebuild.
+  rebuildFingerprint: (userId: number) =>
+    req<FingerprintResponse>(`/users/${userId}/fingerprint/rebuild`, { method: "POST" }),
 
   // #9 study-buddy — get/create my share code, and read a buddy's forecast.
   getShareCode: (userId: number) =>

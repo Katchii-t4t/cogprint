@@ -171,12 +171,23 @@ export default function Paste() {
 
   return (
     <div className="flex flex-col min-h-dvh bg-ink-900 px-4 py-8 max-w-lg mx-auto w-full">
-      {/* Logo */}
+      {/* Logo + library shortcut for returning users */}
       <div className="flex items-center gap-2 mb-10">
         <NeuralDot />
         <span className="text-neural font-semibold tracking-widest text-sm uppercase">
           CogPrint
         </span>
+        <div className="flex-1" />
+        {getState().userId && (
+          <button
+            onClick={() => navigate("/library")}
+            className="text-slate-400 text-xs px-3 py-1.5 rounded-lg bg-ink-700 neural-border
+                       hover:text-neural hover:border-neural/40 active:scale-[0.97] transition-all
+                       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neural/50"
+          >
+            📚 Library
+          </button>
+        )}
       </div>
 
       {phase === "idle" && (

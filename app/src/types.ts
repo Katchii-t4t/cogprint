@@ -100,6 +100,22 @@ export interface FingerprintResponse {
   user_id: number;
   fingerprint: FingerprintProfile;
   updated_at: string;
+  /** §4.2 observability: whether the last rebuild succeeded. Null until first rebuild. */
+  rebuild_status?: "ok" | "failed" | "pending" | null;
+  rebuild_at?: string | null;
+}
+
+/** One deck in the user's library (§3.3) — the returning-user home. */
+export interface MaterialLibraryItem {
+  material_id: number;
+  title: string;
+  created_at: string;
+  last_studied: string;
+  session_count: number;
+  concept_count: number;
+  predicted_retention: number; // R(t) = exp(-t/S), 0..1
+  fading: boolean;
+  reviews_due: number;
 }
 
 export interface StudyPlanDay {
@@ -111,11 +127,22 @@ export interface StudyPlanDay {
   rationale: string;
 }
 
+/** Aggregate cognitive shape of the material itself (backend §3.3/§2.2) —
+    drives the "why this technique for THIS text" surfacing. */
+export interface MaterialProfile {
+  dominant_type: string;                    // factual | conceptual | procedural
+  dominant_difficulty: string;              // foundational | intermediate | advanced
+  type_mix: Record<string, number>;         // proportions, ~sum 1
+  difficulty_mix: Record<string, number>;   // proportions, ~sum 1
+  summary: string;
+}
+
 export interface StudyPlanResponse {
   user_id: number;
   total_days: number;
   days: StudyPlanDay[];
   general_advice: string;
+  material_profile?: MaterialProfile | null;
 }
 
 export interface KnowledgeConcept {

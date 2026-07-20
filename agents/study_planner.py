@@ -537,8 +537,9 @@ class StudyPlanner:
         resume_note = ""
         if resuming:
             gap = int(round(days_since_last_study or 0.0))
+            when = "earlier today" if gap == 0 else f"{gap} day{'s' if gap != 1 else ''} ago"
             resume_note = (
-                f"Resuming: you last studied this {gap} day{'s' if gap != 1 else ''} ago. "
+                f"Resuming: you last studied this {when}. "
                 "This plan picks up from today and front-loads whatever is fading most, "
                 "rather than restarting from scratch.  "
             )

@@ -13,7 +13,12 @@ import {
   type Archetype,
 } from "../forecast";
 import { getStreak, type StreakInfo } from "../streak";
-import type { FingerprintProfile, PendingCheckItem, BuddyForecast } from "../types";
+import type {
+  FingerprintProfile,
+  FingerprintResponse,
+  PendingCheckItem,
+  BuddyForecast,
+} from "../types";
 
 /** Fixed technique order so the art's 7 roots always map the same way
     (identical structure in real and sham modes). */
@@ -26,6 +31,59 @@ function vigorFrom(view: InsightView | null): number[] {
   if (!view) return [];
   const byTech = new Map(view.techniqueRows.map((r) => [r.technique, r.barFraction]));
   return TECH_ORDER.map((t) => byTech.get(t) ?? 0);
+}
+
+/** §2.3 honest uncertainty: turn a technique's Bayesian stability CI (days)
+    into a 7-day retention range via R(7)=e^(−7/S). Returns null when there's
+    no CI to show (e.g. control users' generic profiles — RCT blind intact). */
+function retentionBand(
+  fpResp: FingerprintResponse | null,
+  technique: string,
+): { lo: number; hi: number; early: boolean } | null {
+  const s = fpResp?.fingerprint.technique_stability?.find(
+    (t) => t.technique === technique,
+  );
+  if (!s || s.ci_lower_days <= 0 || s.ci_upper_days <= 0) return null;
+  const lo = Math.round(Math.exp(-7 / s.ci_lower_days) * 100);
+  const hi = Math.round(Math.exp(-7 / s.ci_upper_days) * 100);
+  if (hi - lo < 2) return null; // a ±1% band is noise, not information
+  return { lo, hi, early: !s.population_informed };
+}
+
+/** §4.2 — shown only when the last background rebuild failed. One tap recovers. */
+function RebuildBanner({ onDone }: { onDone: () => void }) {
+  const [busy, setBusy] = useState(false);
+  async function retry() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const userId = currentUserId();
+      if (userId) await api.rebuildFingerprint(userId);
+      onDone();
+    } catch {
+      setBusy(false); // stay visible; the user can retry
+    }
+  }
+  return (
+    <div className="rounded-2xl border border-amber-500/30 bg-amber-950/20 p-4 mb-4 flex items-center gap-3 animate-fade-up">
+      <span className="text-xl" aria-hidden="true">⚠️</span>
+      <div className="flex-1">
+        <p className="text-amber-300 text-sm font-medium">Your fingerprint didn't update</p>
+        <p className="text-amber-400/60 text-xs mt-0.5">
+          The last background update failed — your data is safe, this view may be stale.
+        </p>
+      </div>
+      <button
+        onClick={retry}
+        disabled={busy}
+        className="px-3 py-2 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-300
+                   text-xs font-semibold hover:bg-amber-500/25 active:scale-[0.97] transition-all
+                   disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
+      >
+        {busy ? "Rebuilding…" : "Rebuild"}
+      </button>
+    </div>
+  );
 }
 
 const EFFECTIVENESS_COLORS: Record<string, string> = {
@@ -42,6 +100,7 @@ export default function Grow() {
   const navigate = useNavigate();
 
   const [view, setView] = useState<InsightView | null>(null);
+  const [fpResp, setFpResp] = useState<FingerprintResponse | null>(null);
   const [pendingList, setPendingList] = useState<PendingCheckItem[]>([]);
   const [forecast, setForecast] = useState<MemoryForecast | null>(null);
   const [arch, setArch] = useState<Archetype | null>(null);
@@ -85,6 +144,7 @@ export default function Grow() {
       .then(([fingerprint, checks]) => {
         // insights.ts (master) takes userId for the deterministic sham seed.
         setView(buildView(fingerprint.fingerprint, group ?? "treatment", userId));
+        setFpResp(fingerprint);
         setPendingList(checks);
         // Personalised surfaces (#1 forecast, #2 archetype) are treatment-only,
         // preserving the RCT blind. Control users still get the sham insights +
@@ -111,16 +171,29 @@ export default function Grow() {
       {/* Header */}
       <div className="px-4 pt-8 pb-4">
         <div className="flex items-center justify-between mb-6">
-          <button onClick={() => navigate("/")} className="text-slate-500 text-sm hover:text-slate-300">
+          <button onClick={() => navigate("/")} className="text-slate-500 text-sm hover:text-slate-300 transition-colors">
             ← Paste more
           </button>
-          <button
-            onClick={() => navigate("/plan")}
-            className="text-neural text-sm"
-          >
-            Study plan →
-          </button>
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => navigate("/library")}
+              className="text-slate-400 text-sm hover:text-neural transition-colors"
+            >
+              📚 Library
+            </button>
+            <button
+              onClick={() => navigate("/plan")}
+              className="text-neural text-sm"
+            >
+              Study plan →
+            </button>
+          </div>
         </div>
+
+        {/* §4.2 — a failed background rebuild is surfaced, never silent */}
+        {fpResp?.rebuild_status === "failed" && (
+          <RebuildBanner onDone={() => window.location.reload()} />
+        )}
 
         {/* Practice banner — flashcard rounds are rehearsal, never measurement */}
         {practice && (
@@ -268,24 +341,38 @@ export default function Grow() {
               </Section>
             )}
 
-            {/* Retention / memory profiles */}
+            {/* Retention / memory profiles — with honest uncertainty (§2.3):
+                the Bayesian 95% CI becomes a visible range, and prior-only
+                estimates are labelled "early estimate" instead of posing as
+                measurements. False precision destroys trust. */}
             {v.retentionRows.length > 0 && (
               <Section title="Memory stability per technique">
                 <div className="grid grid-cols-2 gap-3">
-                  {v.retentionRows.map((r) => (
-                    <div
-                      key={r.technique}
-                      className="rounded-2xl bg-ink-700 neural-border p-3 flex flex-col gap-1"
-                    >
-                      <p className="text-slate-400 text-[10px] font-medium uppercase tracking-wider">
-                        {label(r.technique)}
-                      </p>
-                      <p className="text-white font-bold text-xl">
-                        {Math.round(r.predicted7d * 100)}%
-                      </p>
-                      <p className="text-slate-500 text-[10px]">at 7 days · {r.label}</p>
-                    </div>
-                  ))}
+                  {v.retentionRows.map((r) => {
+                    const band = retentionBand(fpResp, r.technique);
+                    return (
+                      <div
+                        key={r.technique}
+                        className="rounded-2xl bg-ink-700 neural-border p-3 flex flex-col gap-1"
+                      >
+                        <p className="text-slate-400 text-[10px] font-medium uppercase tracking-wider">
+                          {label(r.technique)}
+                        </p>
+                        <p className="text-white font-bold text-xl">
+                          {Math.round(r.predicted7d * 100)}%
+                        </p>
+                        <p className="text-slate-500 text-[10px]">at 7 days · {r.label}</p>
+                        {band && (
+                          <p className="text-slate-600 text-[10px]">
+                            likely {band.lo}–{band.hi}%
+                            {band.early && (
+                              <span className="ml-1 text-amber-400/80">· early estimate</span>
+                            )}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </Section>
             )}
