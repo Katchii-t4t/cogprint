@@ -39,3 +39,6 @@ frontend/.env.local
 
 # Logs
 *.log
+
+# Local SQLite databases (schema lives in migrations/)
+*.db

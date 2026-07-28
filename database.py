@@ -187,27 +187,59 @@ def get_db():
 
 
 def init_db():
-    Base.metadata.create_all(bind=engine)
-    _migrate_add_missing_columns()
+    """Bring the database up to the current schema.
 
+    Schema changes are Alembic migrations (``alembic upgrade head``); this only
+    covers the two cases where that has not run yet:
 
-def _migrate_add_missing_columns():
-    """Pragmatic pre-Alembic migration: `create_all` never ALTERs existing
-    tables, so a DB created before a column was added silently breaks every
-    query touching the model. Until Postgres+Alembic land (§4.2), add any
-    missing declared columns with ADD COLUMN (nullable ⇒ safe + idempotent)."""
-    from sqlalchemy import inspect as sa_inspect, text
+      * a brand-new database — created from the models, then stamped at head so
+        the next migration applies cleanly rather than trying to re-create
+        tables that already exist;
+      * an existing database created before Alembic was introduced — stamped at
+        the baseline so its history starts from the right place.
+
+    An already-migrated database is left untouched. This replaces an earlier
+    ADD COLUMN loop that guessed at schema drift: it could only add nullable
+    columns, and silently diverged on anything else.
+    """
+    from sqlalchemy import inspect as sa_inspect
 
     inspector = sa_inspect(engine)
-    with engine.begin() as conn:
-        for table in Base.metadata.sorted_tables:
-            if not inspector.has_table(table.name):
-                continue
-            existing = {c["name"] for c in inspector.get_columns(table.name)}
-            for col in table.columns:
-                if col.name in existing or not col.nullable:
-                    continue  # non-nullable additions need a real migration
-                coltype = col.type.compile(engine.dialect)
-                conn.execute(text(
-                    f'ALTER TABLE {table.name} ADD COLUMN "{col.name}" {coltype}'
-                ))
+    fresh = not inspector.has_table("users")
+    versioned = inspector.has_table("alembic_version")
+
+    if fresh:
+        Base.metadata.create_all(bind=engine)
+
+    if not versioned:
+        _stamp_alembic_head()
+
+
+def _stamp_alembic_head():
+    """Record the current schema as being at the latest migration.
+
+    The live connection is handed to Alembic so the stamp lands on the engine
+    this process is actually using, rather than on whatever DATABASE_URL held
+    when the module was imported.
+
+    Best-effort: a missing or partial Alembic install must not stop the API
+    booting. It is logged rather than swallowed, because the next
+    ``alembic upgrade`` would otherwise behave unexpectedly.
+    """
+    import logging
+
+    try:
+        from alembic import command
+        from alembic.config import Config
+
+        root = os.path.dirname(os.path.abspath(__file__))
+        cfg = Config(os.path.join(root, "alembic.ini"))
+        cfg.set_main_option("script_location", os.path.join(root, "migrations"))
+        with engine.begin() as conn:
+            cfg.attributes["connection"] = conn
+            command.stamp(cfg, "head")
+    except Exception:
+        logging.getLogger("cogprint").warning(
+            "could not stamp the Alembic version table; run 'alembic stamp head' "
+            "before the next migration", exc_info=True,
+        )

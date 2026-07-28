@@ -22,5 +22,7 @@ COPY . .
 ENV PORT=8000
 EXPOSE 8000
 
-# Shell form so $PORT expands at runtime.
-CMD uvicorn main:app --host 0.0.0.0 --port ${PORT}
+# Migrate before serving: the container is the only thing that knows the schema
+# version, and a half-migrated database serving traffic is worse than a slow
+# start. Shell form so $PORT expands at runtime.
+CMD alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port ${PORT}

@@ -1,6 +1,7 @@
 fastapi>=0.110.0
 uvicorn[standard]>=0.27.0
 sqlalchemy>=2.0.0
+alembic>=1.13.0
 pydantic>=2.0.0
 numpy>=1.26.0
 python-dotenv>=1.0.0
@@ -8,6 +9,11 @@ python-dotenv>=1.0.0
 # Optional — only needed for the deprecated narrative mode in
 # agents/performance_optimizer.py. The live pipeline is fully API-free.
 anthropic>=0.40.0
+
+# Postgres driver. SQLite (the default DATABASE_URL) needs no driver, so this is
+# only exercised when DATABASE_URL points at Postgres — as it does in the Docker
+# image and on Render.
+psycopg[binary]>=3.1.0
 
 # Dev / test only
 pytest>=8.0.0
