@@ -1,5 +1,6 @@
 import type {
   User,
+  UserCreated,
   StudyGroup,
   StudyTechnique,
   TimeOfDay,
@@ -32,7 +33,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   createUser: (group: StudyGroup) =>
-    req<User>("/users", { method: "POST", body: JSON.stringify({ group }) }),
+    req<UserCreated>("/users", { method: "POST", body: JSON.stringify({ group }) }),
 
   analyzeMaterial: (title: string, raw_text: string) =>
     req<MaterialAnalysisResponse>("/materials/analyze", {
@@ -105,7 +106,13 @@ export const api = {
       body: JSON.stringify({ image_base64: imageBase64, media_type: mediaType }),
     }),
 
-  getUser: (userId: number) => req<User>(`/users/${userId}`),
+  // Account recovery. There is deliberately no lookup-by-id: ids are sequential,
+  // so that flow let anyone claim any account by counting upward.
+  recoverAccount: (recoveryToken: string) =>
+    req<User>("/auth/recover", {
+      method: "POST",
+      body: JSON.stringify({ recovery_token: recoveryToken }),
+    }),
 
   // §3.3 material library — every deck the user has studied, review-aware.
   getLibrary: (userId: number) =>

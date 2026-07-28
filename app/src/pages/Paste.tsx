@@ -38,8 +38,9 @@ export default function Paste() {
     | null
   >(null);
   const [restoreOpen, setRestoreOpen] = useState(false);
-  const [restoreId, setRestoreId] = useState("");
+  const [restoreKey, setRestoreKey] = useState("");
   const [restoreErr, setRestoreErr] = useState("");
+  const [restoring, setRestoring] = useState(false);
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -65,18 +66,27 @@ export default function Paste() {
   }
 
   async function handleRestore() {
-    const id = parseInt(restoreId, 10);
-    if (!id || Number.isNaN(id)) {
-      setRestoreErr("Enter your numeric CogPrint ID (e.g. 42).");
+    const key = restoreKey.trim();
+    if (!key) {
+      setRestoreErr("Paste the recovery key you saved (it starts with cog_).");
       return;
     }
     setRestoreErr("");
+    setRestoring(true);
     try {
-      const user = await api.getUser(id);
-      setState({ userId: user.id, group: user.group });
+      const user = await api.recoverAccount(key);
+      // Keep the key: it stays valid, and this device now needs it too.
+      setState({ userId: user.id, group: user.group, recoveryKey: key });
       navigate("/grow");
-    } catch {
-      setRestoreErr("We couldn't find that ID — double-check it and try again.");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "";
+      setRestoreErr(
+        msg.startsWith("429")
+          ? "Too many attempts. Wait a few minutes and try again."
+          : "That key doesn't match an account. Check for a missing character."
+      );
+    } finally {
+      setRestoring(false);
     }
   }
 
@@ -117,7 +127,9 @@ export default function Paste() {
           const user = await api.createUser(g as "control" | "treatment");
           userId = user.id;
           group = user.group;
-          setState({ userId, group });
+          // The token is returned exactly once — persist it now or the account
+          // becomes unrecoverable from any other device.
+          setState({ userId, group, recoveryKey: user.recovery_token });
         }
         setState({ lastMaterialId: materialId });
         navigate(`/plan?m=${materialId}`);
@@ -142,7 +154,8 @@ export default function Paste() {
         const user = await api.createUser(g as "control" | "treatment");
         userId = user.id;
         group = user.group;
-        setState({ userId, group });
+        // Returned exactly once — persist it or the account is unrecoverable.
+        setState({ userId, group, recoveryKey: user.recovery_token });
       }
 
       const title = trimmed.slice(0, 60) + (trimmed.length > 60 ? "…" : "");
@@ -322,33 +335,41 @@ export default function Paste() {
             </div>
           )}
 
-          {/* Restore by CogPrint ID — the other half of "save your progress" */}
+          {/* Restore with a recovery key — the other half of "save your progress" */}
           <div className="text-center">
             {!restoreOpen ? (
               <button
                 onClick={() => setRestoreOpen(true)}
-                className="text-slate-600 text-xs hover:text-slate-400 transition-colors"
+                className="text-slate-600 text-xs hover:text-slate-400 transition-colors
+                           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neural/50 rounded px-1"
               >
-                Have a CogPrint ID? Restore your progress
+                Have a recovery key? Restore your progress
               </button>
             ) : (
               <div className="flex flex-col gap-2 animate-fade-up">
                 <div className="flex gap-2">
                   <input
-                    type="number"
-                    value={restoreId}
-                    onChange={(e) => setRestoreId(e.target.value)}
+                    type="text"
+                    value={restoreKey}
+                    onChange={(e) => setRestoreKey(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && handleRestore()}
-                    placeholder="Your CogPrint ID, e.g. 42"
-                    className="flex-1 bg-ink-700 neural-border rounded-xl px-3 py-2 text-sm text-slate-200
-                               placeholder-slate-600 focus:outline-none focus:border-neural/50"
+                    placeholder="cog_…"
+                    autoComplete="off"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    aria-label="Recovery key"
+                    className="flex-1 min-w-0 bg-ink-700 neural-border rounded-xl px-3 py-2 text-sm text-slate-200
+                               font-mono placeholder-slate-600 focus:outline-none focus:border-neural/50"
                   />
                   <button
                     onClick={handleRestore}
+                    disabled={restoring}
                     className="px-4 py-2 rounded-xl bg-ink-600 border border-ink-400 text-slate-200 text-sm
-                               font-medium hover:bg-ink-500 active:scale-[0.97] transition-all"
+                               font-medium hover:bg-ink-500 active:scale-[0.97] transition-all
+                               disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neural/50"
                   >
-                    Restore
+                    {restoring ? "…" : "Restore"}
                   </button>
                 </div>
                 {restoreErr && <p className="text-red-400 text-xs">{restoreErr}</p>}

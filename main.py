@@ -12,7 +12,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from auth import require_api_key
+from auth import rate_limit_recovery, require_api_key
 from config import RETENTION_SCHEDULE
 from schemas.question import FlagQuestionRequest, QuestionSetResponse
 from database import (
@@ -23,8 +23,10 @@ from database import (
     StudyGroup,
     StudySession,
     User,
+    generate_recovery_token,
     generate_share_code,
     get_db,
+    hash_recovery_token,
     init_db,
     utcnow,
 )
@@ -41,11 +43,14 @@ from schemas.session import (
     RetentionCheckCreate,
     RetentionCheckResponse,
     ResearchExportRow,
+    RecoveryRequest,
+    RecoveryRotateResponse,
     ReviewSuggestion,
     SessionCreate,
     SessionResponse,
     StudyPlanResponse,
     UserCreate,
+    UserCreatedResponse,
     UserResponse,
 )
 
@@ -135,17 +140,87 @@ def _fresh_share_code(db: Session) -> str:
     return generate_share_code(10)
 
 
-@app.post("/users", response_model=UserResponse, status_code=201)
+@app.post("/users", response_model=UserCreatedResponse, status_code=201)
 def create_user(body: UserCreate, db: Session = Depends(get_db)):
+    """Create a user and issue their one-time account-recovery token.
+
+    The plaintext token is returned here and nowhere else — only its hash is
+    stored. Clients must persist it and prompt the user to save it, because it
+    is the only way back into the account from a new device or cleared storage.
+    """
+    token = generate_recovery_token()
     user = User(
         group=body.group,
         pre_test_score=body.pre_test_score,
         share_code=_fresh_share_code(db),
+        recovery_token_hash=hash_recovery_token(token),
     )
     db.add(user)
     db.commit()
     db.refresh(user)
+
+    return UserCreatedResponse(
+        **UserResponse.model_validate(user, from_attributes=True).model_dump(),
+        recovery_token=token,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Account recovery
+#
+# Replaces the previous "restore by numeric CogPrint id" flow. Ids are
+# sequential, so that flow let anyone claim any account (and read the material
+# pasted into it) by counting upward. Recovery is now possible only by
+# presenting a 192-bit token that is shown once and stored as a hash.
+#
+# Both endpoints answer 404 for an unknown token — never 401/403, and never a
+# different message for "no such user" vs "wrong token", so probing tells an
+# attacker nothing beyond what they already knew.
+# ---------------------------------------------------------------------------
+
+def _user_for_token(db: Session, token: str) -> User:
+    user = (
+        db.query(User)
+        .filter_by(recovery_token_hash=hash_recovery_token(token))
+        .first()
+    )
+    if not user:
+        raise HTTPException(status_code=404, detail="No account matches that recovery key.")
     return user
+
+
+@app.post(
+    "/auth/recover",
+    response_model=UserResponse,
+    dependencies=[Depends(rate_limit_recovery)],
+)
+def recover_account(body: RecoveryRequest, db: Session = Depends(get_db)):
+    """Exchange a recovery token for the account it belongs to."""
+    return _user_for_token(db, body.recovery_token)
+
+
+@app.post(
+    "/auth/recover/rotate",
+    response_model=RecoveryRotateResponse,
+    dependencies=[Depends(rate_limit_recovery)],
+)
+def rotate_recovery_token(body: RecoveryRequest, db: Session = Depends(get_db)):
+    """Issue a new recovery token, invalidating the current one.
+
+    Rotation requires the *current* token by design. There is deliberately no
+    id-addressed way to mint a token — that would reintroduce the enumeration
+    hole this endpoint pair exists to close.
+    """
+    user = _user_for_token(db, body.recovery_token)
+    token = generate_recovery_token()
+    user.recovery_token_hash = hash_recovery_token(token)
+    db.commit()
+    db.refresh(user)
+
+    return RecoveryRotateResponse(
+        **UserResponse.model_validate(user, from_attributes=True).model_dump(),
+        recovery_token=token,
+    )
 
 
 @app.get("/users/all", dependencies=[Depends(require_api_key)])
@@ -169,8 +244,18 @@ def list_all_users(db: Session = Depends(get_db)):
     return result
 
 
-@app.get("/users/{user_id}", response_model=UserResponse)
+@app.get(
+    "/users/{user_id}",
+    response_model=UserResponse,
+    dependencies=[Depends(require_api_key)],
+)
 def get_user(user_id: int, db: Session = Depends(get_db)):
+    """Researcher/admin lookup by id.
+
+    Behind the API key because ids are sequential: left open, this endpoint
+    enumerates every participant's RCT group and test scores. The consumer app
+    no longer calls it — clients identify themselves with a recovery token.
+    """
     user = db.query(User).filter_by(id=user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")

@@ -18,6 +18,13 @@ export interface User {
   created_at: string;
 }
 
+/** POST /users — the only response that ever carries the plaintext recovery
+    token. The server stores just a hash, so it cannot be re-read later: persist
+    it here and prompt the user to save it. */
+export interface UserCreated extends User {
+  recovery_token: string;
+}
+
 export interface StudySession {
   id: number;
   user_id: number;

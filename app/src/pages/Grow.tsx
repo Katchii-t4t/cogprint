@@ -414,7 +414,7 @@ export default function Grow() {
             {/* Save your progress — value delivered, now the soft commitment
                 moment (no login wall, no account; spec §7). */}
             {!name && (
-              <SaveProgress userId={currentUserId() ?? 0} onSaved={setName} />
+              <SaveProgress onSaved={setName} />
             )}
           </>
         )}
@@ -500,14 +500,20 @@ function LoadingState() {
   );
 }
 
-/** The soft save moment: name yourself + copy your CogPrint ID to return on
-    another device. Client-side only; dismissible; shown once per session. */
-function SaveProgress({ userId, onSaved }: { userId: number; onSaved: (n: string) => void }) {
+/** The soft save moment: name yourself + save the recovery key that gets you
+    back in on another device. Client-side only; dismissible; once per session.
+
+    The key is shown here because the server keeps only a hash and can never
+    re-issue it. It is a bearer secret, so it is masked until revealed — over a
+    shoulder or in a screen recording it should not be readable by accident. */
+function SaveProgress({ onSaved }: { onSaved: (n: string) => void }) {
   const [draft, setDraft] = useState("");
   const [copied, setCopied] = useState(false);
+  const [revealed, setRevealed] = useState(false);
   const [hidden, setHidden] = useState(
     () => sessionStorage.getItem("cog_save_dismissed") === "1"
   );
+  const recoveryKey = getState().recoveryKey;
 
   if (hidden) return null;
 
@@ -518,13 +524,15 @@ function SaveProgress({ userId, onSaved }: { userId: number; onSaved: (n: string
     onSaved(n);
   }
 
-  async function copyId() {
+  async function copyKey() {
+    if (!recoveryKey) return;
     try {
-      await navigator.clipboard.writeText(String(userId));
+      await navigator.clipboard.writeText(recoveryKey);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1500);
     } catch {
-      // Clipboard unavailable — the ID is still visible to copy manually.
+      // Clipboard unavailable — reveal so it can be copied by hand instead.
+      setRevealed(true);
     }
   }
 
@@ -541,8 +549,8 @@ function SaveProgress({ userId, onSaved }: { userId: number; onSaved: (n: string
         </button>
       </div>
       <p className="text-slate-400 text-xs mt-1">
-        Your fingerprint lives on this device. Give yourself a name, and keep
-        your CogPrint ID to pick up where you left off anywhere.
+        Your fingerprint lives on this device. Give yourself a name, and save
+        your recovery key to pick up where you left off anywhere.
       </p>
 
       <div className="flex gap-2 mt-3">
@@ -565,14 +573,41 @@ function SaveProgress({ userId, onSaved }: { userId: number; onSaved: (n: string
         </button>
       </div>
 
-      <div className="flex items-center justify-between mt-3 pt-3 border-t border-ink-500/40">
-        <p className="text-slate-500 text-xs">
-          Your CogPrint ID: <span className="text-neural font-mono font-semibold">#{userId}</span>
-        </p>
-        <button onClick={copyId} className="text-neural text-xs font-medium">
-          {copied ? "Copied ✓" : "Copy ID"}
-        </button>
-      </div>
+      {recoveryKey && (
+        <div className="mt-3 pt-3 border-t border-ink-500/40">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-slate-500 text-xs shrink-0">Your recovery key</p>
+            <div className="flex gap-3 shrink-0">
+              <button
+                onClick={() => setRevealed((r) => !r)}
+                className="text-slate-400 text-xs font-medium hover:text-slate-200 transition-colors
+                           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neural/50 rounded px-1"
+              >
+                {revealed ? "Hide" : "Reveal"}
+              </button>
+              <button
+                onClick={copyKey}
+                className="text-neural text-xs font-medium
+                           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neural/50 rounded px-1"
+              >
+                {copied ? "Copied ✓" : "Copy"}
+              </button>
+            </div>
+          </div>
+          <p
+            className={`text-neural font-mono text-xs mt-1.5 break-all select-all ${
+              revealed ? "" : "blur-[5px] select-none"
+            }`}
+            aria-hidden={!revealed}
+          >
+            {recoveryKey}
+          </p>
+          <p className="text-slate-600 text-[10px] mt-1.5 leading-relaxed">
+            Anyone with this key can open your account, and we can't send it to
+            you again — store it somewhere safe.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

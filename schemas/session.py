@@ -72,6 +72,29 @@ class UserResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class UserCreatedResponse(UserResponse):
+    """The 201 body from POST /users.
+
+    This is the ONLY response that ever carries the plaintext recovery token —
+    only a hash is stored, so it cannot be re-read later. The client is
+    responsible for persisting it and prompting the user to save it.
+    """
+
+    recovery_token: str
+
+
+class RecoveryRequest(BaseModel):
+    """Body for the recovery endpoints — the user's saved bearer secret."""
+
+    recovery_token: str = Field(min_length=8, max_length=128)
+
+
+class RecoveryRotateResponse(UserResponse):
+    """A freshly minted token; the previous one stops working immediately."""
+
+    recovery_token: str
+
+
 class SessionResponse(BaseModel):
     id: int
     user_id: int

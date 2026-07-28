@@ -30,6 +30,10 @@ export interface AppState {
   nudgeDismissedAt: number | null;
   /** #9 study-buddy: a friend's share code we're following (their forecast). */
   buddyCode: string | null;
+  /** Account-recovery token, issued once at sign-up. The only way back into
+      this account from another device or after storage is cleared — the server
+      keeps only a hash and cannot re-issue it. */
+  recoveryKey: string | null;
 }
 
 const EMPTY: AppState = {
@@ -42,6 +46,7 @@ const EMPTY: AppState = {
   recents: [],
   nudgeDismissedAt: null,
   buddyCode: null,
+  recoveryKey: null,
 };
 
 export function getState(): AppState {

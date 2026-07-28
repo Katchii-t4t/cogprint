@@ -1,4 +1,5 @@
 import enum
+import hashlib
 import os
 import secrets
 from datetime import datetime, timezone
@@ -61,6 +62,32 @@ def generate_share_code(length: int = 6) -> str:
     return "".join(secrets.choice(_SHARE_ALPHABET) for _ in range(length))
 
 
+_RECOVERY_PREFIX = "cog_"
+
+
+def generate_recovery_token() -> str:
+    """A bearer secret that lets a user reclaim their account on a new device.
+
+    Replaces the old "type your numeric CogPrint ID" restore, which was
+    trivially enumerable (ids are sequential). 24 random bytes = 192 bits of
+    entropy, so guessing is not a threat model. The ``cog_`` prefix makes the
+    string recognisable to the user (and greppable if one ever leaks).
+    """
+    return _RECOVERY_PREFIX + secrets.token_urlsafe(24)
+
+
+def hash_recovery_token(token: str) -> str:
+    """Hash a recovery token for storage — the plaintext is never persisted.
+
+    SHA-256 (not bcrypt/argon2) is the right choice here: those exist to slow
+    brute force against *low-entropy human-chosen passwords*. This token is 192
+    bits of CSPRNG output, so there is nothing to brute-force, and a fast hash
+    keeps lookup a single indexed equality check rather than a table scan of
+    per-row salted comparisons.
+    """
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -73,6 +100,12 @@ class User(Base):
     # privacy-safe forecast without any account system. Nullable for users that
     # predate this column; generated lazily via the API when missing.
     share_code = Column(String(12), unique=True, index=True, nullable=True)
+    # SHA-256 of the account-recovery token. Indexed because recovery looks the
+    # user up *by* this hash — the plaintext token is returned exactly once, at
+    # account creation, and never stored. Nullable for users that predate the
+    # column: they cannot recover (there is no safe way to mint a token from an
+    # id without recreating the enumeration hole this replaced).
+    recovery_token_hash = Column(String(64), unique=True, index=True, nullable=True)
 
     sessions = relationship("StudySession", back_populates="user")
     retention_checks = relationship("RetentionCheck", back_populates="user")
