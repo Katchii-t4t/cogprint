@@ -308,6 +308,99 @@ _CONCEPT_BLACKLIST = frozenset({
 })
 
 
+# A concept label is a noun phrase, and a noun phrase does not span a finite
+# verb. Without a POS tagger the cheapest reliable proxy is a list of common
+# verb stems: prose like "Chlorophyll absorbs light" otherwise yields the
+# candidate bigram "chlorophyll absorbs", which reads as a broken fragment on a
+# flashcard. The blacklist above grew one observed mistake at a time; this is
+# the structural rule it was approximating.
+#
+# Deliberately biased toward precision. Several entries ("power", "form",
+# "study", "fix") are also perfectly good nouns, so this will occasionally drop
+# a legitimate concept. For flashcards that is the right side to err on: a
+# missing concept costs a card, a nonsense one costs trust.
+_VERB_STEMS = frozenset({
+    "absorb", "accept", "achiev", "act", "add", "affect", "aim", "allow", "appear",
+    "appli", "argu", "aris", "ask", "assum", "attach", "avoid", "becom", "begin",
+    "believ", "bind", "block", "break", "bring", "build", "call", "carri", "caus",
+    "chang", "check", "choos", "claim", "combin", "come", "compar", "complet",
+    "comput", "confirm", "connect", "consid", "consist", "contain", "continu",
+    "contribut", "control", "convert", "creat", "cross", "decid", "declin",
+    "decreas", "defin", "deliv", "depend", "deriv", "describ", "design",
+    "determin", "develop", "differ", "discov", "discuss", "divid", "drive",
+    "emerg", "enabl", "encod", "end", "ensur", "enter", "establish", "estimat",
+    "evolv", "examin", "exceed", "exhibit", "exist", "expand", "expect",
+    "experienc", "explain", "explor", "express", "extend", "fail", "fall",
+    "featur", "feed", "fill", "find", "fix", "flow", "focus", "follow", "form",
+    "found", "gain", "generat", "get", "give", "govern", "grow", "handl",
+    "happen", "hold", "identifi", "impli", "improv", "includ", "increas",
+    "indicat", "influenc", "inhibit", "initi", "integrat", "interact", "introduc",
+    "involv", "keep", "know", "lack", "lead", "learn", "leav", "let", "lie",
+    "limit", "link", "list", "live", "look", "lose", "maintain", "make", "match",
+    "mean", "measur", "meet", "modifi", "move", "need", "note", "observ",
+    "obtain", "occur", "offer", "open", "oper", "organ", "originat", "own",
+    "pass", "perform", "place", "plai", "point", "power", "predict", "prepar",
+    "present", "prevent", "process", "produc", "promot", "propos", "prove",
+    "provid", "publish", "put", "reach", "react", "read", "receiv", "recogn",
+    "reduc", "refer", "reflect", "regul", "relat", "releas", "remain", "remov",
+    "repeat", "replac", "report", "repres", "requir", "respond", "result",
+    "retain", "return", "reveal", "review", "run", "sai", "see", "seek", "seem",
+    "select", "send", "serv", "set", "share", "shift", "show", "sign", "solv",
+    "spend", "split", "start", "state", "stimul", "stop", "store", "studi",
+    "suggest", "suppli", "support", "surround", "sustain", "take", "tell",
+    "tend", "test", "think", "tri", "transfer", "transform", "travel", "treat",
+    "turn", "understand", "undergo", "use", "vari", "view", "work", "yield",
+})
+
+
+# Irregular past tenses can't be caught morphologically, but they are a closed
+# class — the common ones fit in a list that will never need to grow much.
+_IRREGULAR_PAST = frozenset({
+    "became", "began", "broke", "brought", "built", "came", "chose", "did",
+    "drove", "fell", "felt", "found", "gave", "went", "grew", "had", "held",
+    "kept", "knew", "led", "left", "lost", "made", "meant", "met", "paid",
+    "put", "ran", "rose", "said", "sang", "sank", "sat", "saw", "sent", "set",
+    "shone", "shot", "showed", "sold", "spoke", "spread", "stood", "struck",
+    "taught", "thought", "threw", "took", "told", "understood", "went", "won",
+    "wrote", "was", "were", "gone", "seen", "known", "given", "taken", "written",
+})
+
+
+# Words that end in -ed without being verbs. The length guard already excludes
+# the short ones ("speed", "breed"); these are the longer exceptions.
+_ED_NON_VERBS = frozenset({
+    "hundred", "sacred", "hatred", "kindred", "wicked", "naked", "rugged",
+    "learned", "beloved", "crooked", "wretched",
+})
+
+
+def _is_verbal(word: str) -> bool:
+    """True when a token is most likely a verb rather than part of a noun phrase.
+
+    Three signals, cheapest and most general first:
+
+    1. ``-ed`` morphology. Almost every long word ending in -ed is a past tense
+       or participle. The length guard keeps genuine nouns whose stem would be
+       nonsense ("speed" -> "spe") out of the net, and _ED_NON_VERBS covers the
+       longer exceptions.
+    2. An irregular past form, which morphology cannot reach.
+    3. A known verb stem, for present-tense forms like "converts".
+
+    This is a heuristic standing in for a POS tagger, and it is tuned for
+    precision: it will occasionally drop a real concept, which costs a card,
+    rather than admit a fragment, which costs trust.
+    """
+    w = word.lower()
+
+    if w in _ED_NON_VERBS:
+        return False
+    if len(w) > 5 and w.endswith("ed") and len(w) - 2 >= 4:
+        return True
+    if w in _IRREGULAR_PAST:
+        return True
+    return _stem(w) in _VERB_STEMS or w in _VERB_STEMS
+
+
 def _extract_concepts(
     text: str,
     tfidf_vecs: dict[str, np.ndarray],
@@ -334,6 +427,8 @@ def _extract_concepts(
             continue
         if surface in _CONCEPT_BLACKLIST or stem in _CONCEPT_BLACKLIST:
             continue
+        if _is_verbal(surface):            # "converts" is an action, not a concept
+            continue
         unigram_scores[stem] = float(np.sum(vec))
 
     # --- Bigrams: consecutive non-stopword pairs within the SAME sentence ---
@@ -348,6 +443,10 @@ def _extract_concepts(
             if len(w1) <= 3 or len(w2) <= 3:
                 continue
             if w1 in _CONCEPT_BLACKLIST or w2 in _CONCEPT_BLACKLIST:
+                continue
+            # A noun phrase doesn't span a verb: "chlorophyll absorbs" and
+            # "fixes carbon" are sentence fragments, not concepts.
+            if _is_verbal(w1) or _is_verbal(w2):
                 continue
             bigram_surface = f"{w1} {w2}"
             s1 = unigram_scores.get(_stem(w1), 0.0)
