@@ -50,9 +50,35 @@ $("saveSettings").addEventListener("click", async () => {
   if (!participantId || isNaN(Number(participantId))) {
     return setMsg("settingsMsg", "Enter a valid participant ID.", "err");
   }
+
+  // The manifest only grants localhost up front, since a deployed backend's
+  // host can't be known at build time. Ask for it now that the user has named
+  // it — declining leaves the extension working exactly as before, against a
+  // local server.
+  if (!(await ensureHostPermission(baseUrl))) {
+    return setMsg(
+      "settingsMsg",
+      "Permission for that host was declined, so requests to it will fail.",
+      "err"
+    );
+  }
+
   await saveSettings({ participantId, baseUrl, apiKey });
   initLogView({ participantId, baseUrl, apiKey });
 });
+
+/** Request access to a user-supplied backend host, if we don't already have it. */
+async function ensureHostPermission(baseUrl) {
+  let origin;
+  try {
+    origin = `${new URL(baseUrl).origin}/*`;
+  } catch {
+    return false; // not a URL; the fetch would fail anyway
+  }
+  if (!chrome?.permissions) return true; // older browser: manifest grants apply
+  if (await chrome.permissions.contains({ origins: [origin] })) return true;
+  return chrome.permissions.request({ origins: [origin] });
+}
 
 $("gear").addEventListener("click", async () => openSettings(await getSettings()));
 

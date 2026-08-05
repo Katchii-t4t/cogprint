@@ -1,8 +1,19 @@
 # CogPrint — Quick Session Log (browser extension)
 
+> **Scope: this is research tooling, not the consumer product.** It exists so an
+> RCT participant can log a session from the toolbar without opening a UI. The
+> consumer app is `app/` — an installable PWA — and it does not use this
+> extension. If you are looking for the "capture what I'm reading" extension
+> discussed as a future surface, it does not exist yet; this is not it.
+
 A Manifest V3 browser extension that logs a CogPrint study session in one click
 from the toolbar, without opening the full web app. It talks to the same backend
 (`POST /sessions`) as the web frontend.
+
+The backend URL is configurable. The manifest grants localhost up front and asks
+for any other host at the moment you save it — a deployed API's domain cannot be
+known at build time, and requesting it on demand avoids a blanket all-sites
+permission on the install prompt.
 
 No build step — it's plain HTML/CSS/JS. Load it unpacked.
 

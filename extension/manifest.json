@@ -16,5 +16,7 @@
   "host_permissions": [
     "http://localhost:8000/*",
     "http://127.0.0.1:8000/*"
-  ]
+  ],
+  "//": "The backend URL is user-configurable, so a deployed API needs a host the manifest cannot know in advance. Requested at runtime instead of being baked in, which also keeps the install prompt free of a blanket all-sites permission.",
+  "optional_host_permissions": ["https://*/*"]
 }
