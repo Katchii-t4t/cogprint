@@ -213,15 +213,21 @@ export default function Grow() {
           </div>
         )}
 
-        {/* Score banner */}
+        {/* Score banner. The first round gets its own copy (§2.3): the moment
+            the app starts learning about you is the payoff, and it's invisible
+            unless something names it. */}
         {score !== null && (
           <div className="rounded-2xl bg-ink-700 neural-border p-4 mb-4 animate-fade-up">
             <div className="flex items-center gap-3">
-              <span className="text-3xl">{Number(score) >= 80 ? "🔥" : Number(score) >= 50 ? "💪" : "📈"}</span>
+              <span className="text-3xl">
+                {sessionCount === 1 ? "🌱" : Number(score) >= 80 ? "🔥" : Number(score) >= 50 ? "💪" : "📈"}
+              </span>
               <div>
                 <p className="text-white font-bold">{score}% correct this session</p>
                 <p className="text-slate-400 text-xs">
-                  {Number(score) >= 80
+                  {sessionCount === 1
+                    ? "You just taught CogPrint something about you. A few more sessions and your full fingerprint unlocks."
+                    : Number(score) >= 80
                     ? "Excellent retention — your fingerprint is growing."
                     : "Every session teaches the algorithm something new."}
                 </p>

@@ -27,6 +27,20 @@ async function imageFileToBase64Jpeg(file: File): Promise<{ b64: string; media: 
   return { b64: dataUrl.slice(dataUrl.indexOf(",") + 1), media: "image/jpeg" };
 }
 
+/**
+ * The sample used by "Try a sample" (§2.3).
+ *
+ * Chosen to be *about* memory, so the material profile and technique match the
+ * app derives from it are saying something true and interesting on a first
+ * run — the fastest honest way to show what CogPrint does. It goes through the
+ * normal pipeline, so nothing here is faked or seeded.
+ */
+const SAMPLE_TEXT = `The forgetting curve, first measured by Hermann Ebbinghaus in 1885, describes how memory for new material decays exponentially over time. Retention falls fastest in the hours immediately after learning, then levels off.
+
+Spacing repetitions across days slows that decay. Each successful recall increases the stability of the memory, so the next review can be scheduled further out. This is the distributed practice effect, confirmed across hundreds of experiments.
+
+Retrieval practice strengthens memory more than rereading does. The act of pulling information out of memory is itself the thing that consolidates it, which is why testing yourself outperforms passively reviewing notes even when total study time is held constant.`;
+
 export default function Paste() {
   const [text, setText] = useState("");
   const [phase, setPhase] = useState<Phase>("idle");
@@ -308,6 +322,23 @@ export default function Paste() {
           >
             📷 Snap a photo of your notes
           </button>
+
+          {/* First-run path (§2.3): a cold textarea converts worse than one
+              guided round with a visible payoff. Runs the real pipeline — the
+              sample is analysed like any other paste, nothing is seeded. */}
+          {!getState().userId && (
+            <button
+              onClick={() => {
+                setText(SAMPLE_TEXT);
+                track("sample_started");
+                textareaRef.current?.focus();
+              }}
+              className="w-full text-slate-500 text-xs hover:text-neural transition-colors
+                         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neural/50 rounded px-1 py-1"
+            >
+              Nothing to paste yet? Try a sample →
+            </button>
+          )}
 
           <p className="text-center text-slate-600 text-xs">
             ⌘ + Enter to submit · Your data stays private

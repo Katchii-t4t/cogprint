@@ -20,6 +20,7 @@ from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
+from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect
 
 import database
@@ -89,6 +90,38 @@ def test_recovery_token_hash_is_indexed_and_unique(migrated_engine):
     }
     assert "recovery_token_hash" in indexed
     assert "recovery_token_hash" in unique
+
+
+def test_init_db_upgrades_a_database_that_is_behind(tmp_path, monkeypatch):
+    """A checkout stamped at an older revision must be migrated on startup.
+
+    Without this, pulling a schema change and running the server produces a
+    column-not-found crash at the first query rather than a migration — the
+    same class of failure the ADD COLUMN loop was removed to prevent, arriving
+    by a different route.
+    """
+    url = f"sqlite:///{tmp_path / 'behind.db'}"
+    engine = create_engine(url)
+    monkeypatch.setattr(database, "engine", engine)
+
+    # Build the database at the *first* revision only.
+    cfg = Config(os.path.join(_ROOT, "alembic.ini"))
+    cfg.set_main_option("script_location", os.path.join(_ROOT, "migrations"))
+    cfg.set_main_option("sqlalchemy.url", url)
+    script = ScriptDirectory.from_config(cfg)
+    base_rev = list(script.walk_revisions())[-1].revision
+    command.upgrade(cfg, base_rev)
+
+    head = script.get_current_head()
+    assert base_rev != head, "test needs at least two revisions to be meaningful"
+
+    database.init_db()
+
+    with engine.connect() as conn:
+        assert MigrationContext.configure(conn).get_current_revision() == head
+    # And the schema really does match the models now.
+    assert "analytics_events" in set(inspect(engine).get_table_names())
+    engine.dispose()
 
 
 def test_init_db_stamps_a_fresh_database(tmp_path, monkeypatch):
