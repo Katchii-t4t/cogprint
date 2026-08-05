@@ -3,20 +3,23 @@ import io
 import json
 import logging
 import os
+from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import List, Optional
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from auth import rate_limit_email, rate_limit_recovery, require_api_key
 from email_sender import frontend_url, send_email
 from config import RETENTION_SCHEDULE
 from schemas.question import FlagQuestionRequest, QuestionSetResponse
+from analytics import track_event
 from database import (
+    AnalyticsEvent,
     CognitiveFingerprint,
     MagicLinkToken,
     Material,
@@ -166,6 +169,8 @@ def create_user(body: UserCreate, db: Session = Depends(get_db)):
     db.add(user)
     db.commit()
     db.refresh(user)
+
+    track_event(db, user.id, "user_created", {"group": body.group.value})
 
     return UserCreatedResponse(
         **UserResponse.model_validate(user, from_attributes=True).model_dump(),
@@ -567,6 +572,13 @@ def log_session(
     db.commit()
     db.refresh(session)
 
+    track_event(db, body.user_id, "session_logged", {
+        "technique": session.technique.value if hasattr(session.technique, "value") else str(session.technique),
+        "material_id": body.material_id,
+        "quiz_score": body.quiz_score,
+        "duration_minutes": body.duration_minutes,
+    })
+
     # Rebuild the fingerprint after the response is sent so the participant's
     # "log session" request stays fast even as the MCMC pipeline grows.
     background_tasks.add_task(_rebuild_fingerprint_bg, body.user_id)
@@ -608,6 +620,11 @@ def log_retention_check(
     db.add(check)
     db.commit()
     db.refresh(check)
+
+    track_event(db, body.user_id, "retention_check_completed", {
+        "check_type": body.check_type,
+        "score": body.score,
+    })
 
     # Rebuild fingerprint in the background now that we have new retention data.
     background_tasks.add_task(_rebuild_fingerprint_bg, body.user_id)
@@ -700,6 +717,14 @@ def analyze_material(body: MaterialCreate, db: Session = Depends(get_db)):
 
     material.knowledge_map_json = knowledge_map.model_dump_json()
     db.commit()
+
+    # No user_id: analysis happens before signup on a first visit, and that
+    # pre-account edge is the part of the funnel most worth seeing.
+    track_event(db, None, "material_pasted", {
+        "material_id": material.id,
+        "concepts": knowledge_map.total_concepts,
+        "chars": len(body.raw_text),
+    })
 
     return MaterialAnalysisResponse(material_id=material.id, knowledge_map=knowledge_map)
 
@@ -921,11 +946,19 @@ def generate_study_plan(
     fingerprint = load_profile(fp) if fp and fp.profile_json else FingerprintProfile(session_count=0)
 
     planner = StudyPlanner()
-    return planner.generate_plan(
+    plan = planner.generate_plan(
         user_id, knowledge_map, fingerprint, total_days,
         days_since_last_study=days_since_last_study,
         prior_sessions=prior_sessions,
     )
+
+    track_event(db, user_id, "plan_generated", {
+        "material_id": material_id,
+        "total_days": total_days,
+        "resuming": prior_sessions > 0,
+        "confidence": str(fingerprint.confidence),
+    })
+    return plan
 
 
 # ---------------------------------------------------------------------------
@@ -1322,6 +1355,95 @@ def get_buddy_forecast(share_code: str, db: Session = Depends(get_db)):
 # ---------------------------------------------------------------------------
 # Health check
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Analytics
+#
+# First-party by design (see AnalyticsEvent): the events needed to answer "does
+# personalisation improve retention" are research data, and sending them to a
+# third party would both contradict the privacy posture and put the data
+# somewhere it can't be joined against the rest of the schema.
+# ---------------------------------------------------------------------------
+
+class ClientEvent(BaseModel):
+    event_name: str = Field(min_length=1, max_length=64)
+    user_id: Optional[int] = None
+    properties: Optional[dict] = None
+
+
+@app.post("/events", status_code=202)
+def record_client_event(body: ClientEvent, db: Session = Depends(get_db)):
+    """Record a client-side funnel event.
+
+    Unauthenticated on purpose: the most important part of the funnel happens
+    before an account exists, and requiring auth would blind exactly the
+    population whose drop-off matters most. The payload is size-capped in
+    analytics.track_event so it cannot be used to bloat the table, and nothing
+    here is trusted for anything beyond aggregate counts.
+    """
+    track_event(db, body.user_id, body.event_name, body.properties)
+    return {"recorded": True}
+
+
+@app.get("/analytics/funnel", dependencies=[Depends(require_api_key)])
+def analytics_funnel(days: int = 30, db: Session = Depends(get_db)):
+    """Event counts and return rates — the instrument for the beta's question.
+
+    D1/D7 are computed per user relative to that user's own first activity, not
+    a fixed calendar date, because users join on different days. A user counts
+    as "returning on day N" if any event of theirs falls in the 24-hour window
+    starting N days after their first event — a window, not a cumulative
+    "any time since", so it measures actual return behaviour rather than
+    eventual survival.
+    """
+    days = max(1, min(365, days))
+    since = utcnow() - timedelta(days=days)
+
+    rows = (
+        db.query(AnalyticsEvent)
+        .filter(AnalyticsEvent.created_at >= since)
+        .order_by(AnalyticsEvent.created_at)
+        .all()
+    )
+
+    counts: dict[str, int] = defaultdict(int)
+    for r in rows:
+        counts[r.event_name] += 1
+
+    # First activity per user, then look for events in the D1 and D7 windows.
+    first_seen: dict[int, datetime] = {}
+    per_user: dict[int, list[datetime]] = defaultdict(list)
+    for r in rows:
+        if r.user_id is None:
+            continue
+        per_user[r.user_id].append(r.created_at)
+        if r.user_id not in first_seen or r.created_at < first_seen[r.user_id]:
+            first_seen[r.user_id] = r.created_at
+
+    def _returned_on(user_id: int, day: int) -> bool:
+        start = first_seen[user_id] + timedelta(days=day)
+        end = start + timedelta(days=1)
+        return any(start <= ts < end for ts in per_user[user_id])
+
+    # Only users whose window has actually elapsed can be counted, otherwise a
+    # cohort that signed up yesterday drags D7 toward zero by construction.
+    now = utcnow()
+    d1_eligible = [u for u, t in first_seen.items() if now - t >= timedelta(days=2)]
+    d7_eligible = [u for u, t in first_seen.items() if now - t >= timedelta(days=8)]
+
+    def _rate(eligible: list[int], day: int) -> Optional[float]:
+        if not eligible:
+            return None
+        return round(sum(_returned_on(u, day) for u in eligible) / len(eligible), 4)
+
+    return {
+        "window_days": days,
+        "event_counts": dict(sorted(counts.items())),
+        "users_seen": len(first_seen),
+        "d1": {"eligible": len(d1_eligible), "return_rate": _rate(d1_eligible, 1)},
+        "d7": {"eligible": len(d7_eligible), "return_rate": _rate(d7_eligible, 7)},
+    }
+
 
 @app.get("/health")
 def health():

@@ -4,6 +4,7 @@ import { api } from "../api";
 import { currentUserId, lastMaterialId as storedMaterialId } from "../store";
 import type { StudyPlanResponse, StudyPlanDay, PendingCheckItem } from "../types";
 import { label } from "../insights";
+import { track } from "../track";
 import { DELIVERABLE_MODES, resolveMode } from "../study";
 
 /** #3 "why this card, why now" — the retention math behind a scheduled day. */
@@ -60,6 +61,7 @@ export default function Plan() {
       .then(([p, checks, fp]) => {
         setPlan(p);
         setPending(checks);
+        track("plan_viewed", { material_id: materialId, days: p.total_days });
         if (fp) {
           // Map each technique to its retention math for the "why now" chip.
           const map: Record<string, TechniqueWhy> = {};

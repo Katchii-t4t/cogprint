@@ -13,6 +13,7 @@ import {
   type Archetype,
 } from "../forecast";
 import { getStreak, type StreakInfo } from "../streak";
+import { track } from "../track";
 import type {
   FingerprintProfile,
   FingerprintResponse,
@@ -133,6 +134,8 @@ export default function Grow() {
 
     const { group } = getState();
     const isTreatment = (group ?? "treatment") === "treatment";
+
+    track("fingerprint_viewed");
 
     // Streak is behavioural (local, not fingerprint-derived) — safe for both groups.
     setStreak(getStreak());

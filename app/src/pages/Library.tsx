@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { currentUserId } from "../store";
+import { track } from "../track";
 import type { MaterialLibraryItem } from "../types";
 
 /**
@@ -36,6 +37,7 @@ export default function Library() {
   useEffect(() => {
     const userId = currentUserId();
     if (!userId) { navigate("/"); return; }
+    track("library_viewed");
     api
       .getLibrary(userId)
       .then(setItems)

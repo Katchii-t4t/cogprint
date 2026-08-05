@@ -219,6 +219,27 @@ class MagicLinkToken(Base):
     user = relationship("User")
 
 
+class AnalyticsEvent(Base):
+    """First-party product analytics.
+
+    Deliberately not a third-party tool. The events needed to answer "does
+    personalisation actually improve retention" are the study data itself, and
+    shipping that to PostHog or Plausible would contradict the privacy posture
+    that is part of this product's moat — as well as putting the research data
+    somewhere it can't be joined against the rest of the schema.
+    """
+
+    __tablename__ = "analytics_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    # Nullable: the funnel starts before an account exists, and that leading
+    # edge is exactly the population worth measuring.
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    event_name = Column(String(64), index=True, nullable=False)
+    properties_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=utcnow, index=True, nullable=False)
+
+
 def get_db():
     db = SessionLocal()
     try:

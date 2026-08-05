@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api";
+import { track } from "../track";
 import {
   addRecent, dismissNudge, getState, nudgeAllowed, setState,
   type RecentMaterial,
@@ -171,6 +172,10 @@ export default function Paste() {
       // is instant when the user gets there — never a loading wall mid-loop.
       api.getQuestions(result.material_id).catch(() => {});
 
+      track("material_submitted", {
+        material_id: result.material_id,
+        concepts: result.knowledge_map.total_concepts,
+      });
       setConceptCount(result.knowledge_map.total_concepts);
       setPhase("done");
 

@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { currentUserId, currentHour, lastMaterialId as storedMaterialId } from "../store";
 import { resolveMode } from "../study";
+import { track } from "../track";
 import type { Flashcard } from "../types";
 
 /**
@@ -209,6 +210,11 @@ export default function Cards() {
       } catch {
         // fingerprint rebuild is best-effort
       }
+      track("round_completed", {
+        technique: studyTechnique,
+        cards: gradeable.length,
+        score_bucket: score >= 0.8 ? "high" : score >= 0.5 ? "mid" : "low",
+      });
       navigate(`/grow?score=${Math.round(score * 100)}`);
     } else {
       // Flash mode — or a quiz round with zero gradeable cards (stale cache).
