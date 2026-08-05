@@ -373,6 +373,122 @@ def verify_magic_link(body: MagicLinkVerifyRequest, db: Session = Depends(get_db
     return user
 
 
+# ---------------------------------------------------------------------------
+# Data rights (GDPR articles 15 and 17)
+#
+# Both endpoints authenticate with a recovery token in the body rather than a
+# path user_id. Addressing them by id would hand anyone a way to export or
+# erase any account by counting upward — the exact hole /auth/recover exists to
+# have closed.
+# ---------------------------------------------------------------------------
+
+@app.post("/users/me/export", dependencies=[Depends(rate_limit_recovery)])
+def export_my_data(body: RecoveryRequest, db: Session = Depends(get_db)):
+    """Everything CogPrint holds about the caller, as one JSON document."""
+    user = _user_for_token(db, body.recovery_token)
+
+    sessions = db.query(StudySession).filter_by(user_id=user.id).all()
+    checks = db.query(RetentionCheck).filter_by(user_id=user.id).all()
+    fingerprint = db.query(CognitiveFingerprint).filter_by(user_id=user.id).first()
+
+    material_ids = {s.material_id for s in sessions if s.material_id is not None}
+    materials = (
+        db.query(Material).filter(Material.id.in_(material_ids)).all()
+        if material_ids else []
+    )
+
+    return {
+        "exported_at": utcnow().isoformat(),
+        # recovery_token_hash is deliberately absent: it is a credential, and
+        # an export file is exactly the kind of thing that gets emailed around.
+        "account": {
+            "id": user.id,
+            "group": user.group.value if hasattr(user.group, "value") else str(user.group),
+            "email": user.email,
+            "email_verified": user.email_verified_at is not None,
+            "share_code": user.share_code,
+            "created_at": user.created_at.isoformat(),
+            "pre_test_score": user.pre_test_score,
+            "post_test_score": user.post_test_score,
+        },
+        "study_sessions": [
+            {
+                "id": s.id,
+                "material_id": s.material_id,
+                "technique": s.technique.value if hasattr(s.technique, "value") else str(s.technique),
+                "duration_minutes": s.duration_minutes,
+                "time_of_day": s.time_of_day.value if hasattr(s.time_of_day, "value") else str(s.time_of_day),
+                "sleep_hours": s.sleep_hours,
+                "stress_level": s.stress_level,
+                "quiz_score": s.quiz_score,
+                "created_at": s.created_at.isoformat(),
+            }
+            for s in sessions
+        ],
+        "retention_checks": [
+            {
+                "id": c.id,
+                "session_id": c.session_id,
+                "check_type": c.check_type,
+                "score": c.score,
+                "checked_at": c.checked_at.isoformat(),
+            }
+            for c in checks
+        ],
+        "cognitive_fingerprint": (
+            json.loads(fingerprint.profile_json)
+            if fingerprint and fingerprint.profile_json else None
+        ),
+        "materials": [
+            {
+                "id": m.id,
+                "title": m.title,
+                "raw_text": m.raw_text,
+                "knowledge_map": json.loads(m.knowledge_map_json) if m.knowledge_map_json else None,
+                "created_at": m.created_at.isoformat(),
+            }
+            for m in materials
+        ],
+    }
+
+
+@app.post("/users/me/delete", dependencies=[Depends(rate_limit_recovery)])
+def delete_my_account(body: DeleteAccountRequest, db: Session = Depends(get_db)):
+    """Erase the caller's account and everything attached to it.
+
+    Materials are deliberately NOT deleted. A Material row is not owned by one
+    user — the shared-deck feature lets several people study the same row — so
+    cascading here would destroy other people's history. The consequence is
+    that pasted text outlives the account that introduced it; retiring orphaned
+    materials is separate work (see the retention-policy item in
+    COGPRINT_PROBLEMS_2.md §18), not something to bolt onto erasure.
+    """
+    if body.confirm is not True:
+        raise HTTPException(
+            status_code=422,
+            detail="Set confirm=true to permanently delete this account.",
+        )
+
+    user = _user_for_token(db, body.recovery_token)
+    user_id = user.id
+
+    # Children first: retention checks reference sessions, which reference the
+    # user, so deleting in FK order avoids relying on cascade configuration.
+    session_ids = [s.id for s in db.query(StudySession).filter_by(user_id=user_id).all()]
+    if session_ids:
+        db.query(RetentionCheck).filter(
+            RetentionCheck.session_id.in_(session_ids)
+        ).delete(synchronize_session=False)
+    db.query(RetentionCheck).filter_by(user_id=user_id).delete(synchronize_session=False)
+    db.query(StudySession).filter_by(user_id=user_id).delete(synchronize_session=False)
+    db.query(CognitiveFingerprint).filter_by(user_id=user_id).delete(synchronize_session=False)
+    db.query(MagicLinkToken).filter_by(user_id=user_id).delete(synchronize_session=False)
+    db.query(User).filter_by(id=user_id).delete(synchronize_session=False)
+    db.commit()
+
+    return {"deleted": True, "user_id": user_id}
+
+
 @app.get("/users/all", dependencies=[Depends(require_api_key)])
 def list_all_users(db: Session = Depends(get_db)):
     """Return all users with their session counts — for the researcher dashboard.

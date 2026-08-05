@@ -25,14 +25,24 @@ a real server + database. Render reads `render.yaml` and provisions both.
    and creates `cogprint-api` (Docker) + `cogprint-db` (Postgres), wiring
    `DATABASE_URL` automatically.
 3. In the service's **Environment**, set the secrets that are `sync: false`:
-   - `COGPRINT_API_KEY` — a long random string (guards bulk-data endpoints). **Set this before any public traffic.**
+   - `COGPRINT_API_KEY` — a long random string (guards bulk-data endpoints and
+     the research analytics view). **Set this before any public traffic.**
    - `CORS_ORIGINS` — your frontend URL(s), e.g. `https://cogprint.vercel.app` (fill in after Step 2).
-   - `ANTHROPIC_API_KEY` — optional; enables flashcards. Leave unset to launch without them.
+   - `FRONTEND_URL` — same value; this is where emailed sign-in links point.
+     Without it links point at `localhost` and won't work for anyone else.
+   - `RESEND_API_KEY` — optional; enables real magic-link email. Without it the
+     app still works (recovery keys) and links are written to the service logs
+     instead of sent — fine for a private trial, not for real users.
+   - `EMAIL_FROM` — e.g. `CogPrint <noreply@yourdomain.com>`. Resend requires a
+     verified sending domain.
+   - `ANTHROPIC_API_KEY` — optional; upgrades flashcards from local cloze cards
+     to LLM-written ones, and enables photo OCR. Leave unset to launch without it.
 4. Deploy. Confirm `https://<your-api>.onrender.com/health` returns `{"status":"ok"}`.
 
 > The `Dockerfile` installs `psycopg[binary]` so Postgres works in prod; local dev
 > still uses SQLite via the default `DATABASE_URL`. No code change needed —
-> SQLAlchemy reads the URL.
+> SQLAlchemy reads the URL. The container runs `alembic upgrade head` before
+> starting uvicorn, so schema changes apply on deploy.
 
 ## Step 2 — Consumer app on Vercel
 
@@ -50,12 +60,37 @@ Directory `frontend`, add a `frontend/vercel.json` mirroring the app's if missin
 - `curl https://<api>/health` → ok.
 - Flashcards will show the "needs setup" screen unless `ANTHROPIC_API_KEY` is set.
 
+## Step 4 — Daily review reminders (recommended)
+
+Spaced repetition only works if something brings people back at the right time.
+`POST /admin/send-reminders` emails everyone with a verified address and reviews
+due; it is intentionally not self-scheduling (there is no job runner in this
+process), so drive it from outside:
+
+Render → **New → Cron Job**, schedule `0 7 * * *` (07:00 UTC daily), command:
+
+```
+curl -fsS -X POST https://<your-api>.onrender.com/admin/send-reminders \
+  -H "X-API-Key: $COGPRINT_API_KEY"
+```
+
+Users are capped at one reminder per 20 hours in the endpoint itself, so a
+double-fired cron cannot spam anyone.
+
+> **Web Push is a deliberate follow-up, not an oversight.** Real push needs the
+> PWA's service worker to own `push`/`notificationclick` handlers, which means
+> switching the Vite PWA plugin from `generateSW` to `injectManifest` — a build
+> change worth making against a real device to test delivery on, rather than
+> blind. Email reaches the same goal today; add push once there's a phone to
+> verify it against. Note iOS only delivers push to home-screen-installed PWAs.
+
 ## Before charging money (not needed for a free beta)
 
-- Real accounts / data persistence (§2 in `COGPRINT_PROBLEMS.md`) — localStorage
-  loses users across devices.
-- Privacy policy + ToS + data export/delete (§5) — required for EU users.
-- Stripe + freemium gating (§6).
+- ~~Real accounts / data persistence~~ — done: recovery keys + magic-link email.
+- ~~Data export/delete~~ — done: `POST /users/me/export`, `POST /users/me/delete`.
+- Privacy policy + ToS — still required for EU users; the endpoints exist, the
+  legal text does not.
+- Stripe + freemium gating (§6 in `COGPRINT_PROBLEMS.md`).
 
 ## Cost notes
 

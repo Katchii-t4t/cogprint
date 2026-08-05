@@ -3,8 +3,12 @@
 # This provisions the web service and the database and wires DATABASE_URL for you.
 #
 # Secrets NOT set here (add them in the Render dashboard, never in git):
-#   ANTHROPIC_API_KEY   — enables flashcards (optional)
+#   ANTHROPIC_API_KEY   — enables LLM flashcards + photo OCR (optional; the app
+#                         is fully functional without it via local cloze cards)
 #   COGPRINT_API_KEY    — set a long random value before any public traffic
+#   RESEND_API_KEY      — enables real magic-link email (optional; without it
+#                         links are logged instead of sent, which is fine for a
+#                         private trial but not for real users)
 services:
   - type: web
     name: cogprint-api
@@ -26,6 +30,15 @@ services:
         sync: false # optional — enables flashcard generation
       - key: COGPRINT_QGEN_MODEL
         value: claude-haiku-4-5 # cheaper default for prod; change if desired
+      - key: RESEND_API_KEY
+        sync: false # optional — without it, magic links are logged not sent
+      - key: EMAIL_FROM
+        sync: false # e.g. "CogPrint <noreply@yourdomain.com>"
+      - key: FRONTEND_URL
+        sync: false # where emailed links point, e.g. https://cogprint.vercel.app
+      - key: TRUST_PROXY_HEADER
+        value: "1" # Render terminates TLS upstream, so X-Forwarded-For is the
+                   # real client address for rate limiting
 
 databases:
   - name: cogprint-db
