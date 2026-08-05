@@ -13,7 +13,12 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from auth import rate_limit_email, rate_limit_recovery, require_api_key
+from auth import (
+    rate_limit_email,
+    rate_limit_ocr,
+    rate_limit_recovery,
+    require_api_key,
+)
 from email_sender import frontend_url, send_email
 from config import RETENTION_SCHEDULE
 from schemas.question import FlagQuestionRequest, QuestionSetResponse
@@ -66,6 +71,44 @@ from schemas.session import (
 )
 
 logger = logging.getLogger("cogprint")
+
+
+def _init_error_tracking() -> None:
+    """Wire Sentry if a DSN is set; otherwise do nothing at all.
+
+    Deliberately optional in both directions — no DSN and the app runs
+    untouched, no SDK installed and it still runs. Error tracking is the thing
+    that turns "a user hit a bug" from invisible into fixable, but it must not
+    become a dependency of booting, and the offline/self-hosted deployment mode
+    has to stay genuinely free of outbound calls.
+
+    send_default_pii is off: this product's users paste study material that may
+    be personal, and none of it belongs in a crash report.
+    """
+    dsn = os.getenv("SENTRY_DSN")
+    if not dsn:
+        return
+    try:
+        import sentry_sdk
+
+        sentry_sdk.init(
+            dsn=dsn,
+            environment=os.getenv("SENTRY_ENVIRONMENT", "production"),
+            traces_sample_rate=float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.0")),
+            send_default_pii=False,
+            # Sentry otherwise probes for optional third-party libraries by
+            # name, and one of those probes hits this project's own top-level
+            # `agents` package (it expects OpenAI's) and logs an AttributeError
+            # on every boot. The core integrations are what actually capture
+            # errors; the opportunistic ones are noise here.
+            auto_enabling_integrations=False,
+        )
+        logger.info("error tracking enabled")
+    except Exception:  # noqa: BLE001 — never block startup on telemetry
+        logger.warning("SENTRY_DSN is set but Sentry could not start", exc_info=True)
+
+
+_init_error_tracking()
 
 app = FastAPI(title="CogPrint API", version="0.1.0")
 
@@ -738,13 +781,51 @@ def analyze_material(body: MaterialCreate, db: Session = Depends(get_db)):
 MAX_OCR_B64_CHARS = 7_000_000
 
 
-@app.post("/materials/ocr", response_model=OcrResponse)
-def ocr_material(body: OcrRequest):
+# Daily ceilings on the two endpoints that cost real money. Per-client rate
+# limits bound one abuser; these bound the *bill*, which is the thing that
+# actually hurts — a hundred honest users cost the same as one determined one.
+# Counted from the analytics events already being written, so no extra table.
+OCR_DAILY_LIMIT = int(os.getenv("COGPRINT_OCR_DAILY_LIMIT", "200"))
+LLM_CARDS_DAILY_LIMIT = int(os.getenv("COGPRINT_LLM_DAILY_LIMIT", "500"))
+
+
+def _spent_today(db: Session, event_name: str) -> int:
+    """How many billable calls of this kind have happened since midnight UTC."""
+    start = utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    return (
+        db.query(AnalyticsEvent)
+        .filter(
+            AnalyticsEvent.event_name == event_name,
+            AnalyticsEvent.created_at >= start,
+        )
+        .count()
+    )
+
+
+def _enforce_daily_budget(db: Session, event_name: str, limit: int, what: str) -> None:
+    if limit > 0 and _spent_today(db, event_name) >= limit:
+        raise HTTPException(
+            status_code=429,
+            detail=f"{what} is at today's limit. It resets at midnight UTC.",
+        )
+
+
+@app.post(
+    "/materials/ocr",
+    response_model=OcrResponse,
+    dependencies=[Depends(rate_limit_ocr)],
+)
+def ocr_material(body: OcrRequest, db: Session = Depends(get_db)):
     """Transcribe a photo of study material into text.
 
     Pure text acquisition: does NOT create a Material — the frontend feeds the
     returned text into POST /materials/analyze, reusing the whole downstream
     pipeline unchanged. 503 (not 500) when the LLM isn't configured.
+
+    This is the most expensive path in the product (billed per image) and the
+    easiest to abuse, since it takes a file upload from anyone. Three guards,
+    cheapest first: media type, payload size, then the per-client rate limit and
+    the global daily ceiling.
     """
     from agents.material_ocr import (
         ALLOWED_MEDIA_TYPES,
@@ -760,11 +841,16 @@ def ocr_material(body: OcrRequest):
     if len(body.image_base64) > MAX_OCR_B64_CHARS:
         raise HTTPException(status_code=413, detail="Image too large (max ~5 MB).")
 
+    _enforce_daily_budget(db, "ocr_performed", OCR_DAILY_LIMIT, "Photo scanning")
+
     try:
         text = extract_text_from_image(body.image_base64, body.media_type)
     except OcrUnavailable as e:
         raise HTTPException(status_code=503, detail=str(e))
 
+    # Recorded after the call succeeds: a failed request costs nothing, so it
+    # must not consume budget.
+    track_event(db, None, "ocr_performed", {"chars": len(text)})
     return OcrResponse(text=text)
 
 
@@ -828,10 +914,18 @@ def generate_questions(
     # no cost, offline. COGPRINT_MODE=free forces the local path even with a key.
     mode = os.getenv("COGPRINT_MODE", "hybrid").lower()
     used_llm = False
-    if mode != "free":
+    # Over the daily budget we don't fail — we fall back to local cloze cards.
+    # Degrading to the free path is strictly better than denying the user a
+    # study round over a spend ceiling they can't see.
+    over_budget = (
+        LLM_CARDS_DAILY_LIMIT > 0
+        and _spent_today(db, "llm_cards_generated") >= LLM_CARDS_DAILY_LIMIT
+    )
+    if mode != "free" and not over_budget:
         try:
             generated = generate_flashcards(material.title, material.raw_text, n=n)
             used_llm = True
+            track_event(db, None, "llm_cards_generated", {"material_id": material.id})
         except QuestionGenUnavailable:
             generated = None
     else:

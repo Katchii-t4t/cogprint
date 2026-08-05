@@ -1,0 +1,64 @@
+# Runs the same three checks used before every commit in this repo, so a change
+# that breaks any of them can't reach master unnoticed.
+#
+# No secrets are needed and none are used: the backend is designed to work with
+# no API keys (local cloze cards, logged email), which is exactly the
+# configuration CI exercises.
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Migrations apply to an empty database
+        # Catches a migration that is broken on its own terms, separately from
+        # test_migrations.py catching models and migrations drifting apart.
+        run: alembic upgrade head
+        env:
+          DATABASE_URL: sqlite:///./ci_migration_check.db
+      - run: pytest -q
+
+  frontend:
+    name: Consumer app (tsc + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm run build
+      - name: Bundle size budget
+        # The app is mobile-first and the paste screen is the front door, so
+        # growth here is a product regression, not just a number. Fails loudly
+        # rather than drifting up one feature at a time.
+        run: |
+          BYTES=$(du -sb dist | cut -f1)
+          BUDGET=$((3 * 1024 * 1024))
+          echo "dist: $BYTES bytes (budget $BUDGET)"
+          if [ "$BYTES" -gt "$BUDGET" ]; then
+            echo "::error::Bundle exceeds the budget. Lazy-load or trim before raising it."
+            exit 1
+          fi

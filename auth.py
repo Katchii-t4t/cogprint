@@ -135,6 +135,14 @@ rate_limit_email = make_rate_limiter(
     "Too many email requests. Try again in a few minutes.",
 )
 
+# Vision OCR is billed per image, so this is a spend control first and an abuse
+# control second. Generous enough for a real study session (photographing a few
+# pages), tight enough that a script can't run up a bill unattended.
+rate_limit_ocr = make_rate_limiter(
+    "ocr", 20, 3600.0,
+    "Too many photo scans in a short time. Try again later, or paste the text.",
+)
+
 
 def reset_rate_limits() -> None:
     """Clear all buckets. For tests — never called by application code."""
