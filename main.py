@@ -1445,6 +1445,65 @@ def analytics_funnel(days: int = 30, db: Session = Depends(get_db)):
     }
 
 
+# ---------------------------------------------------------------------------
+# Re-engagement
+#
+# Spaced repetition is inert without a channel that brings people back at the
+# right moment: the forgetting curve computes exactly when a review is due, and
+# until now nothing acted on it. This closes that loop by email.
+#
+# Not self-scheduling. There is no background job runner in this process, and
+# adding one to serve a single daily task would be the wrong shape — an
+# external scheduler (Render Cron) posts here instead. See DEPLOY.md step 4.
+# ---------------------------------------------------------------------------
+
+# A doubled cron trigger must not double the mail. Slightly under 24h so a
+# daily job never skips a day by drifting a few minutes later.
+_REMINDER_COOLDOWN = timedelta(hours=20)
+
+
+@app.post("/admin/send-reminders", dependencies=[Depends(require_api_key)])
+def send_review_reminders(db: Session = Depends(get_db)):
+    """Email everyone with a verified address and reviews currently due."""
+    now = utcnow()
+    candidates = (
+        db.query(User)
+        .filter(User.email.isnot(None), User.email_verified_at.isnot(None))
+        .all()
+    )
+
+    sent = 0
+    skipped_recent = 0
+    for user in candidates:
+        if user.last_reminder_sent_at and now - user.last_reminder_sent_at < _REMINDER_COOLDOWN:
+            skipped_recent += 1
+            continue
+
+        due = _reviews_due_count(db, user.id)
+        if due < 1:
+            continue
+
+        send_email(
+            to=user.email,
+            subject=(
+                "1 review is ready" if due == 1 else f"{due} reviews are ready"
+            ),
+            body_text=(
+                f"You have {due} review{'s' if due != 1 else ''} waiting in CogPrint.\n\n"
+                "Your memory of this material is starting to fade — a two-minute "
+                "review is what locks it in.\n\n"
+                f"{frontend_url()}/checks\n"
+            ),
+        )
+        user.last_reminder_sent_at = now
+        sent += 1
+
+    db.commit()
+    track_event(db, None, "reminders_dispatched", {"sent": sent})
+    return {"sent": sent, "skipped_recently_emailed": skipped_recent,
+            "candidates": len(candidates)}
+
+
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "CogPrint API"}
