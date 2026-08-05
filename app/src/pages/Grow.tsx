@@ -606,11 +606,77 @@ function SaveProgress({ onSaved }: { onSaved: (n: string) => void }) {
             Anyone with this key can open your account, and we can't send it to
             you again — store it somewhere safe.
           </p>
+
+          <EmailBackup recoveryKey={recoveryKey} />
         </div>
       )}
     </div>
   );
 }
+/** Optional email backup (§1.1). The key above already works; this exists
+    because an address is something people remember and a 36-character secret
+    is not. Nothing here reveals whether an address is already in use. */
+function EmailBackup({ recoveryKey }: { recoveryKey: string }) {
+  const [email, setEmail] = useState("");
+  const [phase, setPhase] = useState<"idle" | "sending" | "sent" | "error">("idle");
+
+  async function attach() {
+    const value = email.trim();
+    if (!value || phase === "sending") return;
+    setPhase("sending");
+    try {
+      await api.attachEmail(recoveryKey, value);
+      setPhase("sent");
+    } catch {
+      setPhase("error");
+    }
+  }
+
+  if (phase === "sent") {
+    return (
+      <p className="text-neural text-xs mt-3 pt-3 border-t border-ink-500/40">
+        ✓ Check your inbox — confirm the link and you can sign in by email from
+        any device.
+      </p>
+    );
+  }
+
+  return (
+    <div className="mt-3 pt-3 border-t border-ink-500/40">
+      <p className="text-slate-500 text-xs mb-2">
+        Or add an email backup — easier to remember than the key
+      </p>
+      <div className="flex gap-2">
+        <input
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && attach()}
+          placeholder="you@example.com"
+          autoComplete="email"
+          aria-label="Email address for account backup"
+          className="flex-1 min-w-0 bg-ink-800 neural-border rounded-xl px-3 py-2 text-sm text-slate-200
+                     placeholder-slate-600 focus:outline-none focus:border-neural/50"
+        />
+        <button
+          onClick={attach}
+          disabled={!email.trim() || phase === "sending"}
+          className="px-4 py-2 rounded-xl bg-ink-600 border border-ink-400 text-slate-200 text-sm
+                     font-medium hover:bg-ink-500 active:scale-[0.97] transition-all
+                     disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neural/50"
+        >
+          {phase === "sending" ? "…" : "Send"}
+        </button>
+      </div>
+      {phase === "error" && (
+        <p className="text-red-400 text-xs mt-2">
+          Couldn't send that — check the address and try again.
+        </p>
+      )}
+    </div>
+  );
+}
+
 // --- #2 archetype badge -----------------------------------------------------
 function ArchetypeBadge({ archetype }: { archetype: Archetype }) {
   return (

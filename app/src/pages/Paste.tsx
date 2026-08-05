@@ -373,6 +373,8 @@ export default function Paste() {
                   </button>
                 </div>
                 {restoreErr && <p className="text-red-400 text-xs">{restoreErr}</p>}
+
+                <EmailRestore />
               </div>
             )}
           </div>
@@ -412,6 +414,71 @@ export default function Paste() {
           <p className="text-slate-400 text-sm">Building your plan…</p>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Email route back in (§1.1), beside the recovery-key input.
+    The backend answers identically whether or not the address has an account,
+    so this copy must stay neutral — implying a match would leak what the API
+    deliberately hides. */
+function EmailRestore() {
+  const [open, setOpen] = useState(false);
+  const [email, setEmail] = useState("");
+  const [phase, setPhase] = useState<"idle" | "sending" | "sent">("idle");
+
+  async function request() {
+    const value = email.trim();
+    if (!value || phase === "sending") return;
+    setPhase("sending");
+    // A failure here is almost certainly throttling; the neutral confirmation
+    // is still the right thing to show, so both paths land in "sent".
+    await api.requestMagicLink(value).catch(() => {});
+    setPhase("sent");
+  }
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="text-slate-600 text-xs hover:text-slate-400 transition-colors
+                   focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neural/50 rounded px-1"
+      >
+        or email me a sign-in link
+      </button>
+    );
+  }
+
+  if (phase === "sent") {
+    return (
+      <p className="text-slate-400 text-xs">
+        If that address has an account, a sign-in link is on its way.
+      </p>
+    );
+  }
+
+  return (
+    <div className="flex gap-2">
+      <input
+        type="email"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && request()}
+        placeholder="you@example.com"
+        autoComplete="email"
+        aria-label="Email address"
+        className="flex-1 min-w-0 bg-ink-700 neural-border rounded-xl px-3 py-2 text-sm text-slate-200
+                   placeholder-slate-600 focus:outline-none focus:border-neural/50"
+      />
+      <button
+        onClick={request}
+        disabled={!email.trim() || phase === "sending"}
+        className="px-4 py-2 rounded-xl bg-ink-600 border border-ink-400 text-slate-200 text-sm
+                   font-medium hover:bg-ink-500 active:scale-[0.97] transition-all
+                   disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neural/50"
+      >
+        {phase === "sending" ? "…" : "Send"}
+      </button>
     </div>
   );
 }

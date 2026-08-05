@@ -1,6 +1,7 @@
 import type {
   User,
   UserCreated,
+  GenericAck,
   StudyGroup,
   StudyTechnique,
   TimeOfDay,
@@ -112,6 +113,27 @@ export const api = {
     req<User>("/auth/recover", {
       method: "POST",
       body: JSON.stringify({ recovery_token: recoveryToken }),
+    }),
+
+  // Email auth — a friendlier second route back in. The server's replies here
+  // are deliberately uninformative about whether an address has an account;
+  // the UI must not imply otherwise.
+  attachEmail: (recoveryToken: string, email: string) =>
+    req<GenericAck>("/auth/email/attach", {
+      method: "POST",
+      body: JSON.stringify({ recovery_token: recoveryToken, email }),
+    }),
+
+  requestMagicLink: (email: string) =>
+    req<GenericAck>("/auth/magic-link/request", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
+
+  verifyMagicLink: (token: string) =>
+    req<User>("/auth/magic-link/verify", {
+      method: "POST",
+      body: JSON.stringify({ token }),
     }),
 
   // §3.3 material library — every deck the user has studied, review-aware.

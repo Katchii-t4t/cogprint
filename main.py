@@ -12,17 +12,20 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from auth import rate_limit_recovery, require_api_key
+from auth import rate_limit_email, rate_limit_recovery, require_api_key
+from email_sender import frontend_url, send_email
 from config import RETENTION_SCHEDULE
 from schemas.question import FlagQuestionRequest, QuestionSetResponse
 from database import (
     CognitiveFingerprint,
+    MagicLinkToken,
     Material,
     RetentionCheck,
     SessionLocal,
     StudyGroup,
     StudySession,
     User,
+    generate_magic_link_token,
     generate_recovery_token,
     generate_share_code,
     get_db,
@@ -43,6 +46,11 @@ from schemas.session import (
     RetentionCheckCreate,
     RetentionCheckResponse,
     ResearchExportRow,
+    DeleteAccountRequest,
+    EmailAttachRequest,
+    GenericAck,
+    MagicLinkRequest,
+    MagicLinkVerifyRequest,
     RecoveryRequest,
     RecoveryRotateResponse,
     ReviewSuggestion,
@@ -221,6 +229,148 @@ def rotate_recovery_token(body: RecoveryRequest, db: Session = Depends(get_db)):
         **UserResponse.model_validate(user, from_attributes=True).model_dump(),
         recovery_token=token,
     )
+
+
+# ---------------------------------------------------------------------------
+# Magic-link email auth
+#
+# A second, friendlier way back into an account. The recovery token works but is
+# a long secret the user must store somewhere; an email address is something
+# they already remember. It is strictly additive — the token keeps working.
+#
+# Two invariants, both load-bearing:
+#   * An address only becomes usable for login once its owner has clicked a
+#     link sent to it, so claiming someone else's address achieves nothing.
+#   * /auth/magic-link/request answers identically whether or not the address
+#     matches an account. Otherwise it becomes an oracle for "does this person
+#     use CogPrint", which is exactly the enumeration problem in another shape.
+# ---------------------------------------------------------------------------
+
+_MAGIC_LINK_TTL = timedelta(minutes=15)
+
+
+def _issue_magic_link(db: Session, user: User, purpose: str) -> str:
+    """Create a single-use token and return the URL it belongs in."""
+    token = generate_magic_link_token()
+    db.add(MagicLinkToken(
+        user_id=user.id,
+        token_hash=hash_recovery_token(token),
+        purpose=purpose,
+        expires_at=utcnow() + _MAGIC_LINK_TTL,
+    ))
+    db.commit()
+    return f"{frontend_url()}/auth/verify?token={token}"
+
+
+@app.post(
+    "/auth/email/attach",
+    response_model=GenericAck,
+    dependencies=[Depends(rate_limit_email)],
+)
+def attach_email(body: EmailAttachRequest, db: Session = Depends(get_db)):
+    """Attach an email to this account and send a verification link.
+
+    The address is recorded immediately but stays unverified — and unverified
+    addresses are never accepted for login — so recording one costs nothing
+    even if it turns out not to belong to this person.
+    """
+    user = _user_for_token(db, body.recovery_token)
+
+    taken = (
+        db.query(User)
+        .filter(
+            User.email == body.email,
+            User.email_verified_at.isnot(None),
+            User.id != user.id,
+        )
+        .first()
+    )
+    if taken:
+        # Same shape as success: revealing that an address is already verified
+        # elsewhere would leak account existence.
+        return GenericAck(message="Check your inbox for a verification link.")
+
+    user.email = body.email
+    user.email_verified_at = None
+    db.commit()
+
+    link = _issue_magic_link(db, user, "verify_email")
+    send_email(
+        to=body.email,
+        subject="Confirm your email for CogPrint",
+        body_text=(
+            "Confirm this address so you can get back into CogPrint from any "
+            f"device:\n\n{link}\n\nThe link works once and expires in 15 minutes. "
+            "If you didn't ask for this, you can ignore it."
+        ),
+    )
+    return GenericAck(message="Check your inbox for a verification link.")
+
+
+@app.post(
+    "/auth/magic-link/request",
+    response_model=GenericAck,
+    dependencies=[Depends(rate_limit_email)],
+)
+def request_magic_link(body: MagicLinkRequest, db: Session = Depends(get_db)):
+    """Email a sign-in link, if that address belongs to a verified account.
+
+    Always answers the same way. The response must not depend on whether a
+    match was found.
+    """
+    user = (
+        db.query(User)
+        .filter(User.email == body.email, User.email_verified_at.isnot(None))
+        .first()
+    )
+    if user:
+        link = _issue_magic_link(db, user, "login")
+        send_email(
+            to=body.email,
+            subject="Your CogPrint sign-in link",
+            body_text=(
+                f"Here's your link back into CogPrint:\n\n{link}\n\n"
+                "It works once and expires in 15 minutes."
+            ),
+        )
+    return GenericAck(
+        message="If that address has an account, a sign-in link is on its way."
+    )
+
+
+@app.post(
+    "/auth/magic-link/verify",
+    response_model=UserResponse,
+    dependencies=[Depends(rate_limit_recovery)],
+)
+def verify_magic_link(body: MagicLinkVerifyRequest, db: Session = Depends(get_db)):
+    """Redeem a link, returning the account it signs the caller into.
+
+    Unknown, already-used and expired tokens are answered identically, so a
+    holder of a stale link learns nothing about why it failed.
+    """
+    record = (
+        db.query(MagicLinkToken)
+        .filter_by(token_hash=hash_recovery_token(body.token))
+        .first()
+    )
+    now = utcnow()
+    if not record or record.consumed_at is not None or record.expires_at <= now:
+        raise HTTPException(status_code=404, detail="That link is no longer valid.")
+
+    record.consumed_at = now
+    user = db.query(User).filter_by(id=record.user_id).first()
+    if not user:
+        # The owning account was deleted between issue and redemption.
+        db.commit()
+        raise HTTPException(status_code=404, detail="That link is no longer valid.")
+
+    if record.purpose == "verify_email":
+        user.email_verified_at = now
+
+    db.commit()
+    db.refresh(user)
+    return user
 
 
 @app.get("/users/all", dependencies=[Depends(require_api_key)])

@@ -76,6 +76,15 @@ def generate_recovery_token() -> str:
     return _RECOVERY_PREFIX + secrets.token_urlsafe(24)
 
 
+def generate_magic_link_token() -> str:
+    """Single-use secret embedded in an emailed link.
+
+    No ``cog_`` prefix: unlike the recovery token this is never shown to the
+    user as something to keep, it only ever lives inside a URL.
+    """
+    return secrets.token_urlsafe(24)
+
+
 def hash_recovery_token(token: str) -> str:
     """Hash a recovery token for storage — the plaintext is never persisted.
 
@@ -106,6 +115,13 @@ class User(Base):
     # column: they cannot recover (there is no safe way to mint a token from an
     # id without recreating the enumeration hole this replaced).
     recovery_token_hash = Column(String(64), unique=True, index=True, nullable=True)
+    # Optional second way back in (see MagicLinkToken). Unverified addresses are
+    # stored but never accepted for login, so claiming someone else's address
+    # gains nothing until they prove they own it.
+    email = Column(String(255), unique=True, index=True, nullable=True)
+    email_verified_at = Column(DateTime, nullable=True)
+    # Frequency cap for re-engagement mail, so a doubled cron can't spam anyone.
+    last_reminder_sent_at = Column(DateTime, nullable=True)
 
     sessions = relationship("StudySession", back_populates="user")
     retention_checks = relationship("RetentionCheck", back_populates="user")
@@ -176,6 +192,31 @@ class CognitiveFingerprint(Base):
     last_rebuild_error = Column(Text, nullable=True)  # truncated message, ops-only
 
     user = relationship("User", back_populates="fingerprint")
+
+
+class MagicLinkToken(Base):
+    """A single-use, short-lived secret delivered by email.
+
+    Two purposes share one table because the lifecycle is identical — issue,
+    email, consume once, expire — and only the side effect on redemption
+    differs: ``verify_email`` marks the address as proven, ``login`` simply
+    identifies the account on a new device.
+
+    Only the hash is stored, matching the recovery-token design: a database
+    leak must not hand out working links.
+    """
+
+    __tablename__ = "magic_link_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    token_hash = Column(String(64), unique=True, index=True, nullable=False)
+    purpose = Column(String(20), nullable=False)  # "verify_email" | "login"
+    expires_at = Column(DateTime, nullable=False)
+    consumed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=utcnow, nullable=False)
+
+    user = relationship("User")
 
 
 def get_db():

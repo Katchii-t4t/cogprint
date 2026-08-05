@@ -25,6 +25,13 @@ export interface UserCreated extends User {
   recovery_token: string;
 }
 
+/** Response shape for endpoints that deliberately reveal nothing about whether
+    an email matched an account. */
+export interface GenericAck {
+  ok: boolean;
+  message: string;
+}
+
 export interface StudySession {
   id: number;
   user_id: number;

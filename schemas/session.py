@@ -95,6 +95,55 @@ class RecoveryRotateResponse(UserResponse):
     recovery_token: str
 
 
+def _normalise_email(value: str) -> str:
+    """Trim and lowercase; reject only what is obviously not an address.
+
+    Deliberately not a full RFC check (and no email-validator dependency): the
+    definitive test of an address is whether its owner can click the link we
+    send there, which the verification flow already performs. A strict regex
+    here would add a dependency and still reject valid exotic addresses.
+    """
+    email = value.strip().lower()
+    local, _, domain = email.partition("@")
+    if not local or not domain or "." not in domain or " " in email:
+        raise ValueError("Enter a valid email address.")
+    return email
+
+
+class EmailAttachRequest(BaseModel):
+    """Attach an email address to the account holding this recovery token."""
+
+    recovery_token: str = Field(min_length=8, max_length=128)
+    email: str = Field(min_length=3, max_length=255)
+
+    _clean_email = field_validator("email")(_normalise_email)
+
+
+class MagicLinkRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=255)
+
+    _clean_email = field_validator("email")(_normalise_email)
+
+
+class MagicLinkVerifyRequest(BaseModel):
+    token: str = Field(min_length=8, max_length=128)
+
+
+class GenericAck(BaseModel):
+    """A response that deliberately carries no information about whether the
+    address matched an account — the non-enumeration contract in one shape."""
+
+    ok: bool = True
+    message: str
+
+
+class DeleteAccountRequest(BaseModel):
+    recovery_token: str = Field(min_length=8, max_length=128)
+    # Not a default: an omitted confirm must fail, so a mistaken call cannot
+    # delete an account by accident.
+    confirm: bool
+
+
 class SessionResponse(BaseModel):
     id: int
     user_id: int

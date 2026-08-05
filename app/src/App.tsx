@@ -10,6 +10,7 @@ const Cards = lazy(() => import("./pages/Cards"));
 const Grow = lazy(() => import("./pages/Grow"));
 const Checks = lazy(() => import("./pages/Checks"));
 const Library = lazy(() => import("./pages/Library"));
+const Verify = lazy(() => import("./pages/Verify"));
 
 /** Route-transition fallback — same spinner language as the in-page loaders. */
 function RouteFallback() {
@@ -32,6 +33,7 @@ export default function App() {
           <Route path="/grow" element={<Grow />} />
           <Route path="/checks" element={<Checks />} />
           <Route path="/library" element={<Library />} />
+          <Route path="/auth/verify" element={<Verify />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>

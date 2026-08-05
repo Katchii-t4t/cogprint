@@ -68,8 +68,8 @@ def require_api_key(x_api_key: Optional[str] = Header(default=None)) -> None:
 #     TRUST_PROXY_HEADER is set, so we opt into X-Forwarded-For explicitly
 #     rather than trusting a spoofable header by default.
 
-_RECOVERY_MAX_ATTEMPTS = 10
-_RECOVERY_WINDOW_SECONDS = 300.0
+# Buckets are shared across limiters and namespaced by the limiter's own name,
+# so two endpoints with different budgets cannot spend each other's allowance.
 _attempts: Dict[str, Deque[float]] = {}
 
 
@@ -81,28 +81,59 @@ def _client_key(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-def rate_limit_recovery(request: Request) -> None:
-    """FastAPI dependency: cap recovery attempts per client per window."""
-    now = time.monotonic()
-    key = _client_key(request)
-    bucket = _attempts.setdefault(key, deque())
+def make_rate_limiter(
+    name: str,
+    max_attempts: int,
+    window_seconds: float,
+    message: str = "Too many attempts. Try again in a few minutes.",
+):
+    """Build a FastAPI dependency that caps requests per client per window.
 
-    while bucket and now - bucket[0] > _RECOVERY_WINDOW_SECONDS:
-        bucket.popleft()
+    A factory rather than a copied function per endpoint: the sliding-window
+    logic exists once, and each credential endpoint picks its own budget.
+    """
 
-    if len(bucket) >= _RECOVERY_MAX_ATTEMPTS:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many recovery attempts. Try again in a few minutes.",
-        )
+    def limiter(request: Request) -> None:
+        now = time.monotonic()
+        key = f"{name}:{_client_key(request)}"
+        bucket = _attempts.setdefault(key, deque())
 
-    bucket.append(now)
+        while bucket and now - bucket[0] > window_seconds:
+            bucket.popleft()
 
-    # Bound memory: drop buckets that have fully aged out. Cheap because it only
-    # runs once the table is large enough to be worth scanning.
-    if len(_attempts) > 1024:
-        for k in [k for k, v in _attempts.items() if not v or now - v[-1] > _RECOVERY_WINDOW_SECONDS]:
-            _attempts.pop(k, None)
+        if len(bucket) >= max_attempts:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=message,
+            )
+
+        bucket.append(now)
+
+        # Bound memory: drop buckets that have fully aged out. Cheap because it
+        # only runs once the table is large enough to be worth scanning.
+        if len(_attempts) > 1024:
+            stale = [
+                k for k, v in _attempts.items()
+                if not v or now - v[-1] > window_seconds
+            ]
+            for k in stale:
+                _attempts.pop(k, None)
+
+    return limiter
+
+
+rate_limit_recovery = make_rate_limiter(
+    "recovery", 10, 300.0,
+    "Too many recovery attempts. Try again in a few minutes.",
+)
+
+# Sending mail costs money and reaches a third party's inbox, so the budget is
+# tighter than for a pure lookup: this bounds both spend and the blast radius if
+# someone tries to use the endpoint to harass an address.
+rate_limit_email = make_rate_limiter(
+    "email", 5, 900.0,
+    "Too many email requests. Try again in a few minutes.",
+)
 
 
 def reset_rate_limits() -> None:
