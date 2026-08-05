@@ -102,5 +102,9 @@ export function getStreak(): StreakInfo {
 function isNextDay(a: string, b: string): boolean {
   const da = new Date(a + "T00:00:00");
   const db = new Date(b + "T00:00:00");
-  return db.getTime() - da.getTime() === 86_400_000;
+  // Rounded, not exact. These are *local* midnights, so a day that spans a
+  // daylight-saving change is 23 or 25 hours long — an `=== 86_400_000` test
+  // silently returns false there and resets the longest streak once every
+  // spring and autumn, for every user in a DST timezone (i.e. all of Norway).
+  return Math.round((db.getTime() - da.getTime()) / 86_400_000) === 1;
 }

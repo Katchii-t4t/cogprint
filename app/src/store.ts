@@ -36,31 +36,46 @@ export interface AppState {
   recoveryKey: string | null;
 }
 
-const EMPTY: AppState = {
-  userId: null,
-  group: null,
-  name: null,
-  lastMaterialId: null,
-  lastMaterialTitle: null,
-  lastMaterialText: null,
-  recents: [],
-  nudgeDismissedAt: null,
-  buddyCode: null,
-  recoveryKey: null,
-};
+/** A function, not a constant: a shared `{ ...EMPTY }` is a *shallow* copy, so
+    every caller would receive the same `recents` array and one push anywhere
+    would corrupt the default for the whole session. */
+function empty(): AppState {
+  return {
+    userId: null,
+    group: null,
+    name: null,
+    lastMaterialId: null,
+    lastMaterialTitle: null,
+    lastMaterialText: null,
+    recents: [],
+    nudgeDismissedAt: null,
+    buddyCode: null,
+    recoveryKey: null,
+  };
+}
 
 export function getState(): AppState {
   try {
     const raw = localStorage.getItem(KEY);
-    return raw ? { ...EMPTY, ...JSON.parse(raw) } : { ...EMPTY };
+    // Merging onto a fresh default is what lets a state written by an older
+    // build — one with no `recents` key at all — still read as valid here.
+    return raw ? { ...empty(), ...JSON.parse(raw) } : empty();
   } catch {
-    return { ...EMPTY };
+    return empty();
   }
 }
 
 export function setState(patch: Partial<AppState>) {
   const prev = getState();
-  localStorage.setItem(KEY, JSON.stringify({ ...prev, ...patch }));
+  try {
+    localStorage.setItem(KEY, JSON.stringify({ ...prev, ...patch }));
+  } catch {
+    // Storage can refuse: iOS Safari in private mode throws from setItem, and
+    // any browser throws at quota. Persistence is genuinely lost when that
+    // happens and this session's identity will not survive a reload — but the
+    // caller is usually the sign-up handler, and crashing it turns a degraded
+    // session into a white screen. The worse outcome is the unhandled throw.
+  }
 }
 
 export function clearState() {
@@ -90,8 +105,20 @@ export function dismissNudge() {
   setState({ nudgeDismissedAt: Date.now() });
 }
 
+/**
+ * The client is the only place a session's time-of-day label is decided — the
+ * backend stores whatever it is sent — so this bucketing *is* the definition
+ * used by the optimal-conditions analysis.
+ *
+ * The small hours belong to night, not morning. A 2am session pooled with 9am
+ * ones drags a night owl's `best_time_of_day` toward "morning", which is the
+ * opposite of the advice they need. Sessions logged before this boundary
+ * moved are not relabelled; with no production users yet that is a handful of
+ * local rows, not a migration.
+ */
 export function currentHour(): TimeOfDay {
   const h = new Date().getHours();
+  if (h < 5) return "night";
   if (h < 12) return "morning";
   if (h < 17) return "afternoon";
   if (h < 21) return "evening";
