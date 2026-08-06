@@ -170,21 +170,27 @@ library.
    Whichever is canonical, **both numbers must come from it** — a visible
    interval that does not contain its own point estimate reads as a bug and
    costs exactly the calibration trust the brand is built on.
-4. **The technique-scoring scale has a ceiling, and fixing it needs a decision
-   about the material table.** Detailed under Monte Carlo study 1 above. The
-   arithmetic problem is not in doubt; what is in doubt is how much authority
-   `_CANDIDATES_BY_CONTEXT` deserves. It is CogPrint's own extrapolation from
-   Dunlosky's main effects to technique × material-type *interactions*, which
-   the literature supports far less strongly. Three options, and the middle one
-   is the recommendation:
-   - keep it as a strong prior and accept that measured evidence rarely wins;
-   - **`log S + β·log(material_weight)` with β tuned so a ~3× measured
-     stability advantage overturns a rank-1 material fit** — evidence can win,
-     but only with a lot of it;
-   - drop the table and let the research priors plus measured data decide,
-     which is the honest position if the interaction cannot be validated.
+4. **How much authority does `_CANDIDATES_BY_CONTEXT` deserve?** The scoring
+   ceiling is fixed (Monte Carlo study 1 above), but the underlying question is
+   not settled: that table extrapolates from Dunlosky's *main effects* to
+   technique × material-type *interactions*, which the literature supports far
+   less strongly. It currently ships as a strong prior worth a 3× evidence
+   bar. If the interaction cannot be validated, the honest position is to drop
+   the table and let priors plus measured data decide. Cheap to test once
+   there is data: compare predicted retention with and without the material
+   term in `evaluation/predictive_baseline.py`.
 
-5. **Technique is self-selected, so nothing here is causal.** The app offers a
+5. **The loop never explores, and that is now the binding constraint.**
+   `_technique_for_concept` is deterministic; the LinUCB bandit has
+   exploration but only shapes what is *recommended*, and the ModePicker lets
+   the user override freely. The Monte Carlo prices it: at τ=0.6, exploration
+   is worth +0.037 retention and 3× the rate of finding the learner's best
+   technique — and without it the scoring fix contributes nothing, because the
+   planner samples 1 technique of 7 and has nothing to compare. **This is the
+   highest-value remaining change to the brain.** It is also open finding 6:
+   the same mechanism is what makes any causal claim possible.
+
+6. **Technique is self-selected, so nothing here is causal.** The app offers a
    technique and the learner picks. "Re-reading works for me" and "I re-read
    material I already half-know" are indistinguishable in the data. The only
    fix is assigning the technique on some fraction of sessions — the LinUCB
@@ -253,7 +259,31 @@ exploration does not rescue it (EXPLORER samples 6 techniques and still
 loses), which locates the fault precisely: not too little data, but a scoring
 rule that cannot act on the data it has.
 
-**The cause is a structural ceiling, and it is assumption-free arithmetic.**
+**Fixed since, with an honest result.** Scoring moved to log space —
+`log(S) + β·log(material_weight)` — with β derived from a stated criterion
+rather than tuned: a floor-weight technique overturns a rank-1 material fit
+exactly when the learner's measured stability is 3× higher, giving
+β = log 3 / −log(floor) ≈ 2.3. Re-running the loop after that change:
+
+| τ | PLANNER before | PLANNER after | EXPLORER before | EXPLORER after |
+|---|---|---|---|---|
+| 0.0 | 0.719 | 0.720 | 0.710 | 0.713 |
+| 0.3 | 0.715 | 0.710 | 0.715 | **0.723** |
+| 0.6 | 0.742 | 0.712 | 0.739 | **0.749** |
+
+PLANNER did not improve. EXPLORER now *does* — it rises with τ (0.713 → 0.723
+→ 0.749) and reaches the best technique 5% → 15% → 30% of the time, where
+before it was flat. That is the change working exactly as designed: evidence
+is now actionable. PLANNER cannot benefit because it still samples **1.0–1.2
+of 7 techniques** — it has no evidence to act on.
+
+So the two defects are separable, and only one is fixed:
+- *scoring could not act on evidence* — fixed, and EXPLORER is the proof;
+- *the loop never gathers evidence* — *not* fixed. This is open finding 5,
+  and the Monte Carlo now prices it: at τ=0.6 exploration is worth **+0.037
+  retention and 3× the hit rate**. Without it the scoring fix is inert.
+
+**The cause of the ceiling, and it is assumption-free arithmetic.**
 `score = material_weight × effectiveness`, where effectiveness is 7-day
 retention — bounded above by 1.0. A rank-1 technique scores `1.0 × a`; a
 floor technique scores `0.62 × e ≤ 0.62`. So once the ranked technique
@@ -262,14 +292,22 @@ learner whose practice testing is genuinely 3.3× more durable (S=40d vs 12d)
 is still told to use active recall. Widening the floor from 0.45 to 0.62
 raised the ceiling; it did not remove it.
 
-Scoring on **stability** (unbounded) instead picks correctly in that case —
-but a straight swap makes the priors dominate material fit at cold start,
-because the priors are far more spread out in stability than in retention.
-The defensible formulation is log-space with a bounded material coefficient,
-`log S + β·log(material_weight)`, and **β is a judgement call about how much
-authority the material table should have** — a table which is CogPrint's own
-extrapolation, not an established finding. That is why it is not implemented
-here. See open finding 4.
+Scoring on **stability** (unbounded) fixes it, which is what now ships. Two
+knobs carry the judgement, both stated as rules rather than magic numbers:
+`_EVIDENCE_OVERRIDE_RATIO = 3.0` (how much measured advantage overturns the
+material table) and `_UNMEASURED_DISCOUNT = 0.6` (an untried technique must be
+~1.7× more durable *in the literature* than what you have measured before the
+plan switches you to it). Change those two if the material table's authority
+should change; nothing else needs touching.
+
+**New consequence, not yet addressed:** on the stability scale a confident
+learner's best technique now sits far above the rotation margin, so the band
+collapses to one and the 14-day plan goes monotonous again for exactly the
+users who have earned personalisation. That is the rule behaving correctly —
+there is no indifference to exploit — so the fix is *not* a wider band, which
+would just resurrect the ceiling. Varied practice has its own evidence base,
+so the honest fix is an explicit interleaving term in the objective rather
+than variety smuggled in through an indifference threshold.
 
 Caveat that limits all of study 1: the simulation sets true stability from the
 *global* prior plus a person term, i.e. it assumes technique × material-type

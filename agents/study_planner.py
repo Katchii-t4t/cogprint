@@ -50,7 +50,7 @@ import math
 from collections import defaultdict
 from typing import Optional
 
-from personalization.priors import prior_effectiveness
+from personalization.priors import prior_effectiveness, prior_stability_days
 from schemas.fingerprint import FingerprintProfile
 from schemas.session import KnowledgeMap, MaterialProfile, StudyPlanDay, StudyPlanResponse
 
@@ -200,32 +200,68 @@ _CANDIDATES_BY_CONTEXT: dict[tuple[str, str], list[str]] = {
 #
 # At a floor of 0.62 the material term spans 1.6x, so it still decides among
 # techniques the learner has no data on (the cold-start case, where it should
-# decide), while a clear measured advantage — up to ~2.3x — can outweigh it.
+# decide), while a clear measured advantage can outweigh it — see _BETA below
+# for how much of an advantage, and why that is a derived number.
 _RANK_WEIGHTS = [1.0, 0.85, 0.72]
 _MATERIAL_FLOOR = 0.62
 
-# A technique scoring within this fraction of the day's best is treated as
-# equally good, and the plan rotates among them across days. Rotation only ever
-# happens inside that indifference band: a clearly better technique is never
-# given up for variety. See _technique_for_concept.
+# Techniques within this ratio of the day's best are treated as equally good,
+# and the plan rotates among them across days. Rotation only ever happens inside
+# that indifference band: a clearly better technique is never given up for
+# variety. Expressed as a log margin because scoring happens in log space, where
+# a *multiplicative* band is an additive offset — scaling a log score by 0.85
+# is meaningless and inverts once scores go negative.
 _ROTATION_BAND = 0.85
+_ROTATION_MARGIN = -math.log(_ROTATION_BAND)
 
-# Applied to a technique whose effectiveness is still the research prior rather
-# than this learner's own delayed retention.
+# How much the material context is allowed to tilt the choice, as an exponent on
+# the material weight in log space:
 #
-# Without it, widening the material floor had a side effect worth naming: an
-# *unmeasured* technique carrying a high population prior (practice testing,
-# 0.85) beat a technique this learner had actually been measured at (0.70).
+#     score = log(S) + BETA · log(material_weight)
+#
+# BETA is derived, not tuned. It is fixed by one stated criterion: a technique
+# the context does not call out at all (weight = the floor) should overturn a
+# rank-1 material fit exactly when the learner's own measured stability for it
+# is _EVIDENCE_OVERRIDE_RATIO times higher. Solving
+# log(k·S) + BETA·log(floor) = log(S) gives BETA = log(k) / −log(floor).
+#
+# Why log space at all: the previous form multiplied the material weight by
+# 7-day *retention*, which is bounded above by 1.0. A rank-1 technique scored
+# 1.0·a and a floor technique at most 0.62·1.0 = 0.62, so once the ranked
+# technique measured above 0.62 no possible evidence could overturn it — a
+# learner whose practice testing was genuinely 3.3× more durable was still told
+# to use active recall. Stability is unbounded above, so a large advantage can
+# actually be expressed. (evaluation/monte_carlo.py --loop is the measurement.)
+_EVIDENCE_OVERRIDE_RATIO = 3.0
+_BETA = math.log(_EVIDENCE_OVERRIDE_RATIO) / -math.log(_MATERIAL_FLOOR)
+
+# Applied to the prior stability of a technique this learner has never tried.
+#
 # A population average and a personal measurement are not the same kind of
-# claim, and scoring them on one scale treats them as if they were.
+# claim, and without a discount the higher-prior untried technique simply wins.
+# Stated as a rule rather than a magic number: an untried technique has to be
+# roughly 1/0.6 ≈ 1.7× more durable *in the literature* than what the learner
+# has actually measured before the plan switches them to it.
 #
 # Limitation, stated rather than hidden: this is a flat stand-in for proper
 # uncertainty weighting. eff_map carries point estimates with no sample size,
-# so the planner cannot tell two sessions from twenty, and a measurement from
-# two sessions gets the same standing as one from twenty. The real fix is to
-# pass the posterior (which fingerprint_builder already computes) into the
-# planner instead of a bare float.
-_UNMEASURED_DISCOUNT = 0.9
+# so a measurement from two sessions gets the same standing as one from twenty.
+# The real fix is to pass the posterior (which fingerprint_builder already
+# computes) into the planner instead of a bare float.
+_UNMEASURED_DISCOUNT = 0.6
+
+
+def _implied_stability(retention_7d: float) -> float:
+    """Ebbinghaus stability implied by a measured 7-day retention: R = e^(−7/S).
+
+    Scoring happens in stability rather than retention because retention is
+    bounded above by 1.0 and stability is not. Two techniques at 0.90 and 0.95
+    retention look nearly identical on the bounded scale while differing by a
+    factor of three in durability — and durability is the thing the schedule
+    actually exploits.
+    """
+    r = min(max(retention_7d, 1e-3), 1.0 - 1e-6)
+    return -7.0 / math.log(r)
 
 
 def _material_weights(difficulty: str, concept_type: str) -> dict[str, float]:
@@ -272,10 +308,10 @@ def _technique_for_concept(
     def score(tech: str) -> float:
         measured = eff_map.get(tech)
         if measured is None:
-            effectiveness = prior_effectiveness(tech) * _UNMEASURED_DISCOUNT
+            stability = prior_stability_days(tech) * _UNMEASURED_DISCOUNT
         else:
-            effectiveness = measured
-        return mat_w.get(tech, _MATERIAL_FLOOR) * effectiveness
+            stability = _implied_stability(measured)
+        return math.log(stability) + _BETA * math.log(mat_w.get(tech, _MATERIAL_FLOOR))
 
     scored = sorted(
         techniques,
@@ -285,8 +321,6 @@ def _technique_for_concept(
         reverse=True,
     )
     top = score(scored[0])
-    if top <= 0:
-        return scored[0]
 
     # Rotate across days among techniques the model cannot meaningfully
     # separate. Fourteen identical days is bad practice (varied practice is
@@ -294,7 +328,7 @@ def _technique_for_concept(
     # scheduling a technique the model rates clearly worse would be trading the
     # user's time for visual interest. The band is the compromise: vary only
     # where varying costs nothing.
-    band = [t for t in scored if score(t) >= _ROTATION_BAND * top]
+    band = [t for t in scored if score(t) >= top - _ROTATION_MARGIN]
     return band[day_idx % len(band)]
 
 
