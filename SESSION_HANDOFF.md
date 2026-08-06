@@ -99,7 +99,8 @@ Violating any of these breaks the product:
 
 ## 4. What is built (state at `022a29a`)
 
-**150 backend tests + 126 frontend tests green. 3 migrations. tsc + build clean.**
+**150 backend tests + 128 frontend tests green. 3 migrations. tsc + build clean.**
+(`npm run lint` does *not* pass — 4 pre-existing errors, see §7.)
 
 ### The full loop works
 paste (or photo, or sample) → knowledge map → 14-day adaptive plan → study mode
@@ -135,8 +136,11 @@ library.
 
 ### Tier 4 — polish (~10h, nothing blocking) — **this is the next code work**
 1. ~~**Frontend tests**~~ — **done** (`11eb3c3`, `022a29a`). Vitest + jsdom +
-   React Testing Library, 126 tests. `cd app && npm test`. It found five real
-   bugs; see §7.
+   React Testing Library, 128 tests. `cd app && npm test`. It found five real
+   bugs; see §7. **Not covered:** `Paste.tsx` (510 lines, the front door),
+   `Plan.tsx`, `Library.tsx`, `Checks.tsx`, `Study.tsx`, `Verify.tsx` and the
+   router in `App.tsx` all still have zero render tests. Paste is the one worth
+   doing next — it is the only screen every user must pass through.
 2. **i18n Norwegian** (~3h) — extract UI strings, nb/nn + en, browser-locale default. Pass material language through to card generation. Her first beta cohort is Norwegian.
 3. **a11y audit** (~2h) — WCAG-AA contrast on the dark theme, ARIA for the SVG fingerprint and icon-only buttons, keyboard nav + visible focus. (`prefers-reduced-motion` is already done.)
 4. **Edit a flashcard** (~2h) — currently a bad card can only be flagged, not corrected. Store the correction and prefer it.
@@ -234,11 +238,17 @@ tests could see:
 1. **The RCT blind was broken in production.** `fingerprint_builder` pinned
    control users to `confidence=LOW` forever, and the client gates its whole
    fingerprint screen on `confidence !== "low"` — so control saw "your
-   fingerprint is growing" permanently while treatment saw a full screen, and
-   `insights.ts`'s entire sham view never rendered at all. Confidence is now
-   derived from the session count for both arms (it discloses nothing measured;
-   the count is already sent). **This is the one to remember: the sham view is
-   only reachable because of that one line.**
+   fingerprint is growing" permanently while treatment saw a full screen.
+   `buildShamView` still *ran* — its session count and confidence reached the
+   header — but its technique bars, memory grid, insights and top technique
+   never rendered, because every one of those sits inside the
+   `confidence !== "low"` branch. Confidence is now derived from the session
+   count for both arms (it discloses nothing measured; the count is already
+   sent). **This is the one to remember: the sham screen is only reachable
+   because of that one line.**
+   Note it is served from cache: `GET /fingerprint` returns the stored
+   `profile_json`, so an existing control user keeps the old confidence until
+   their next session triggers a rebuild.
 2. `retentionBand()` read `technique_stability` off the raw API response rather
    than the sham view — a leak by construction. Now gated on treatment.
 3. `store.ts` spread a module-level `EMPTY`, so every `getState()` handed out
@@ -249,6 +259,12 @@ tests could see:
 5. `currentHour()` bucketed 00:00–04:59 as "morning". The client is the only
    place `time_of_day` is decided, so 2am sessions were dragging night owls'
    `best_time_of_day` the wrong way.
+
+**`npm run lint` fails with 4 pre-existing errors** (`react-hooks/purity` and
+`set-state-in-effect`, in `Grow.tsx` ×3 and `Verify.tsx` ×1). None come from the
+test arc, and CI does not run lint — which is why they accumulated unnoticed.
+Either fix them or add lint to CI with those rules downgraded; leaving a script
+that always fails just trains everyone to skip it.
 
 Also: **`npx tsc --noEmit` in `app/` was a no-op.** `tsconfig.json` is a
 solution file (`files: []` + references), so without `-b` it resolves zero
@@ -356,7 +372,7 @@ items are done), `DEPLOY.md` (click-path).
 python -m uvicorn main:app --port 8000     # backend (repo root)
 cd app && npm run dev                       # app on :5173
 python -m pytest -q                         # 150 tests, ~2 min
-cd app && npm test                          # 126 frontend tests, ~7s
+cd app && npm test                          # 128 frontend tests, ~8s
 cd app && npx tsc -b && npm run build       # NOT `tsc --noEmit` — see §7
 ```
 

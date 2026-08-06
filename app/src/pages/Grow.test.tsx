@@ -98,8 +98,15 @@ describe("a control participant's screen", () => {
     expect(screen.queryByText(/early estimate/i)).not.toBeInTheDocument();
   });
 
-  it("does not carry any real insight text", async () => {
+  it("renders the sham insights, not whatever the payload carried", async () => {
+    // The blinded payload ships a single placeholder insight. If it renders,
+    // the control arm is on the real view — one line of generic advice where
+    // treatment has three specific ones, which is the emptier screen again.
     await renderGrow("control");
+    expect(screen.queryByText(/keep up your regular study routine/i)).not.toBeInTheDocument();
+    expect(screen.getAllByText(/→/).length).toBeGreaterThanOrEqual(1);
+
+    // And nothing from a measured payload, in case the wiring is ever crossed.
     for (const real of richFingerprint().insights) {
       const claim = real.split("?")[0];
       expect(screen.queryByText(new RegExp(claim.slice(0, 24), "i"))).not.toBeInTheDocument();

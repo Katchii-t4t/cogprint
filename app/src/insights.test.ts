@@ -23,12 +23,30 @@ describe("the blind: control must never receive measured signal", () => {
   });
 
   it("does not pass the real best technique through to control", () => {
-    // The real fingerprint's clear winner is active_recall with re_reading
-    // worst. A sham view that happened to reproduce the real ranking would be
-    // leaking — so assert the sham ordering is its own, seeded construction.
     const sham = buildShamView(fp, 42);
     const real = buildRealView(fp);
     expect(sham.topTechnique).not.toBe(real.topTechnique);
+  });
+
+  it("produces the same screen from two fingerprints that disagree about everything", () => {
+    // This is the assertion that actually proves the blind, rather than
+    // observing that two values happen to differ. The sham is a function of
+    // (seed, session_count) alone: feed it a fingerprint with a clear measured
+    // winner and one with no measurements at all, matched only on the honest
+    // fields, and the output must be byte-identical. Anything that varies
+    // between these two is, by definition, measured signal reaching control.
+    const measured = richFingerprint({ session_count: 9, confidence: "medium" });
+    const blank = fingerprint({ session_count: 9, confidence: "medium" });
+    expect(buildShamView(blank, 7)).toEqual(buildShamView(measured, 7));
+  });
+
+  it("stays independent of measured data across many users", () => {
+    // One seed could coincide. Sweep instead.
+    for (let seed = 1; seed <= 20; seed++) {
+      const measured = richFingerprint({ session_count: seed, confidence: "medium" });
+      const blank = fingerprint({ session_count: seed, confidence: "medium" });
+      expect(buildShamView(blank, seed)).toEqual(buildShamView(measured, seed));
+    }
   });
 
   it("does not pass real retention numbers through to control", () => {
