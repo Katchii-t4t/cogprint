@@ -99,7 +99,7 @@ Violating any of these breaks the product:
 
 ## 4. What is built (state at `022a29a`)
 
-**170 backend tests + 128 frontend tests green. 3 migrations. tsc + build clean.**
+**182 backend tests + 128 frontend tests green. 3 migrations. tsc + build clean.**
 (`npm run lint` does *not* pass — 4 pre-existing errors, see §7.)
 
 ### The full loop works
@@ -170,7 +170,21 @@ library.
    Whichever is canonical, **both numbers must come from it** — a visible
    interval that does not contain its own point estimate reads as a bug and
    costs exactly the calibration trust the brand is built on.
-3. **Technique is self-selected, so nothing here is causal.** The app offers a
+4. **The technique-scoring scale has a ceiling, and fixing it needs a decision
+   about the material table.** Detailed under Monte Carlo study 1 above. The
+   arithmetic problem is not in doubt; what is in doubt is how much authority
+   `_CANDIDATES_BY_CONTEXT` deserves. It is CogPrint's own extrapolation from
+   Dunlosky's main effects to technique × material-type *interactions*, which
+   the literature supports far less strongly. Three options, and the middle one
+   is the recommendation:
+   - keep it as a strong prior and accept that measured evidence rarely wins;
+   - **`log S + β·log(material_weight)` with β tuned so a ~3× measured
+     stability advantage overturns a rank-1 material fit** — evidence can win,
+     but only with a lot of it;
+   - drop the table and let the research priors plus measured data decide,
+     which is the honest position if the interaction cannot be validated.
+
+5. **Technique is self-selected, so nothing here is causal.** The app offers a
    technique and the learner picks. "Re-reading works for me" and "I re-read
    material I already half-know" are indistinguishable in the data. The only
    fix is assigning the technique on some fraction of sessions — the LinUCB
@@ -201,6 +215,68 @@ technique beat one the learner had been measured on, which is wrong — a
 population average and a personal measurement are different claims. The proper
 fix is passing the posterior into the planner instead of a bare float, so
 sample size counts; `eff_map` currently cannot tell two sessions from twenty.
+
+### Monte Carlo studies (`evaluation/monte_carlo.py`)
+```bash
+python -m evaluation.monte_carlo --loop           # study 1, ~1 min
+python -m evaluation.monte_carlo --misspecified   # study 2, ~2 min
+```
+
+**Study 2 — misspecification — is reassuring.** Generate forgetting as a power
+law (Wixted & Ebbesen: forgetting is power-law, not exponential), fit with the
+app's exponential anyway, matched at t=7:
+
+| world | CI coverage | rank agreement | picks best | bias |
+|---|---|---|---|---|
+| exponential (control) | 91% | 0.95 | 80% | −0.009 |
+| power law | 83% | 0.95 | 77% | −0.026 |
+
+The numbers go slightly biased and the intervals slightly overconfident, but
+**the ordering is untouched** — and ordering is what the recommendation
+consumes. The Bayesian layer is robust to the curve being wrong. Separately,
+the 95% credible interval covers at 92–96% across 2–16 sessions, so the
+interval itself is honest; the "26% · likely 0–10%" contradiction is purely
+the two-estimator problem in open finding 2, not a broken posterior.
+
+**Study 1 — the closed loop — is not reassuring.** 150 learners × 60 sessions,
+scored on true 7-day retention achieved:
+
+| τ | ORACLE | DUNLOSKY | PLANNER | EXPLORER |
+|---|---|---|---|---|
+| 0.0 | 0.843 | 0.843 | **0.719** | 0.710 |
+| 0.3 | 0.843 | 0.834 | **0.715** | 0.715 |
+| 0.6 | 0.867 | 0.812 | **0.742** | 0.739 |
+
+The planner tries **1.2–1.4 of 7 techniques** and lands on the learner's truly
+best one 0–13% of the time. It loses to always-do-practice-testing. Random
+exploration does not rescue it (EXPLORER samples 6 techniques and still
+loses), which locates the fault precisely: not too little data, but a scoring
+rule that cannot act on the data it has.
+
+**The cause is a structural ceiling, and it is assumption-free arithmetic.**
+`score = material_weight × effectiveness`, where effectiveness is 7-day
+retention — bounded above by 1.0. A rank-1 technique scores `1.0 × a`; a
+floor technique scores `0.62 × e ≤ 0.62`. So once the ranked technique
+measures above 0.62, *no possible evidence* can overturn it. Demonstrated: a
+learner whose practice testing is genuinely 3.3× more durable (S=40d vs 12d)
+is still told to use active recall. Widening the floor from 0.45 to 0.62
+raised the ceiling; it did not remove it.
+
+Scoring on **stability** (unbounded) instead picks correctly in that case —
+but a straight swap makes the priors dominate material fit at cold start,
+because the priors are far more spread out in stability than in retention.
+The defensible formulation is log-space with a bounded material coefficient,
+`log S + β·log(material_weight)`, and **β is a judgement call about how much
+authority the material table should have** — a table which is CogPrint's own
+extrapolation, not an established finding. That is why it is not implemented
+here. See open finding 4.
+
+Caveat that limits all of study 1: the simulation sets true stability from the
+*global* prior plus a person term, i.e. it assumes technique × material-type
+interactions do not exist. If they do exist as `_CANDIDATES_BY_CONTEXT`
+assumes, the planner's material-first choice is less wrong than this table
+suggests. The ceiling finding does not depend on that assumption; the size of
+the retention gap does.
 
 ### The validation harness (`evaluation/predictive_baseline.py`)
 Answers "does personalisation actually predict better?" offline, from the
@@ -447,7 +523,7 @@ items are done), `DEPLOY.md` (click-path).
 ```bash
 python -m uvicorn main:app --port 8000     # backend (repo root)
 cd app && npm run dev                       # app on :5173
-python -m pytest -q                         # 170 tests, ~2.5 min
+python -m pytest -q                         # 182 tests, ~2.5 min
 python -m pytest -q -m "not slow"           # skip the MCMC calibration tests
 cd app && npm test                          # 128 frontend tests, ~8s
 cd app && npx tsc -b && npm run build       # NOT `tsc --noEmit` — see §7

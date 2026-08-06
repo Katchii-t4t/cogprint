@@ -16,6 +16,7 @@ Two behaviours matter:
 from agents.study_planner import (
     _ROTATION_BAND,
     _delayed_retention,
+    _priority,
     _material_weights,
     _technique_effectiveness_map,
     _technique_for_concept,
@@ -184,6 +185,43 @@ def test_a_measured_zero_is_data_not_a_missing_value():
 def test_delayed_retention_prefers_the_longer_delay():
     stats = _stats("active_recall", avg_retention_7d=0.6, avg_retention_24h=0.85)
     assert _delayed_retention(stats) == 0.6
+
+
+# ── review urgency must use the learner's own curve ───────────────────────────
+
+def test_review_priority_uses_the_measured_stability():
+    """`stabilities` is keyed by technique, and _priority looked it up by
+    concept name — a key that is never in it. Every review's urgency therefore
+    fell back to the 10-day default, so a learner with a measured 40-day curve
+    was scheduled identically to one with a 4-day curve. The rationale text
+    printed beside it used the correct value, so the plan explained itself with
+    one number and ordered itself by another."""
+    common = dict(
+        concept="Glucose", current_day=10, last_studied={"Glucose": 3},
+        eff_map={"active_recall": 0.8}, technique="active_recall", is_new=False,
+    )
+    fragile = _priority(stabilities={"active_recall": 2.0}, **common)
+    durable = _priority(stabilities={"active_recall": 60.0}, **common)
+
+    # Seven days after study: the fragile memory is nearly gone and urgently
+    # needs review; the durable one is barely faded.
+    assert fragile > durable
+    assert fragile > 0.7
+    assert durable < 0.2
+
+
+def test_new_concepts_outrank_every_review():
+    """First exposure has to happen before anything can be reviewed."""
+    review = _priority(
+        concept="Glucose", current_day=30, last_studied={"Glucose": 0},
+        stabilities={"active_recall": 1.0}, eff_map={"active_recall": 1.0},
+        technique="active_recall", is_new=False,
+    )
+    new = _priority(
+        concept="Rubisco", current_day=1, last_studied={}, stabilities={},
+        eff_map={}, technique="active_recall", is_new=True,
+    )
+    assert new >= review
 
 
 # ── material profile aggregation ──────────────────────────────────────────────

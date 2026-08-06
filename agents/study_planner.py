@@ -325,7 +325,13 @@ def _priority(
 
     last = last_studied.get(concept, 0)
     lag  = current_day - last
-    S    = stabilities.get(concept, _DEFAULT_S)
+    # Keyed by TECHNIQUE. `stabilities` is the fingerprint's per-technique
+    # stability map (posterior median, OLS fallback), and this looked the
+    # concept name up in it — a key that is never present, so every review's
+    # urgency was computed from the 10-day default no matter what the learner's
+    # own curve said. The rationale text beside it used the right value, so the
+    # plan explained itself with one number and ordered itself by another.
+    S    = stabilities.get(technique, _DEFAULT_S)
     R    = _retention(lag, S)
     eff  = eff_map.get(technique, prior_effectiveness(technique))
     return (1.0 - R) * eff
