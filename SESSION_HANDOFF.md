@@ -99,7 +99,7 @@ Violating any of these breaks the product:
 
 ## 4. What is built (state at `022a29a`)
 
-**150 backend tests + 128 frontend tests green. 3 migrations. tsc + build clean.**
+**159 backend tests + 128 frontend tests green. 3 migrations. tsc + build clean.**
 (`npm run lint` does *not* pass — 4 pre-existing errors, see §7.)
 
 ### The full loop works
@@ -172,6 +172,53 @@ fixed, because both are research-design calls rather than bugs:
    Whichever is canonical, **both numbers must come from it** — a visible
    interval that does not contain its own point estimate reads as a bug and
    costs exactly the calibration trust the brand is built on.
+
+### The validation harness (`evaluation/predictive_baseline.py`)
+Answers "does personalisation actually predict better?" offline, from the
+retention checks the app already collects — no RCT, no control arm, no extra
+participants. Three predictors on identical held-out points:
+
+| | S comes from | claims |
+|---|---|---|
+| `PRIOR` | research prior per technique | nothing personal |
+| `PERSON` | `prior[technique] × m_user` | you forget slower; technique ranking is everyone's |
+| `PERSONAL` | posterior per (person, technique) | **which technique suits you is personal** |
+
+`PERSONAL` beating `PERSON` is the whole product thesis. `PERSONAL` beating
+`PRIOR` is not — that can come entirely from the person level and be misread.
+
+```bash
+python -m evaluation.predictive_baseline --db        # once there are users
+python -m evaluation.predictive_baseline --simulate  # power table, ~3.5 min
+```
+
+**Power, from the simulation** (how often `PERSONAL` beat `PERSON`; τ is the
+between-person spread in per-technique stability, log units):
+
+| τ | 10u × 3s | 10u × 6s | 10u × 12s | 20u × 12s |
+|---|---|---|---|---|
+| 0.0 | 16% | 3% | 2% | 0% |
+| 0.2 | 58% | 24% | 70% | 69% |
+| 0.4 | 93% | 90% | **100%** | 100% |
+| 0.6 | 100% | 100% | 100% | 100% |
+
+Read: **10 users × 12 sessions per technique settles a moderate-or-larger
+effect.** A small effect (τ=0.2) is not detectable at any scale she can reach —
+and is probably too small to build a differentiator on anyway. The τ=0 row is
+the false-positive check, not a result; it must stay low.
+
+Two honest limits: the simulation generates data under the model's own
+assumptions, so real-world power is *lower* than this table, and technique is
+self-selected in the app, so a win is predictive association, not a causal
+technique effect. The fix for the second is assigning technique on some
+fraction of sessions.
+
+**The harness is tested (`tests/test_predictive_baseline.py`), because a broken
+evaluator is worse than none.** Its first version declared personalisation a
+100% winner on data generated with the effect set to exactly zero — its
+baseline could not represent population-level technique differences either, so
+`PERSONAL` beat it for a reason unrelated to personalisation. That is why
+`PERSON` fits a *multiplier on the per-technique prior*, not one pooled S.
 
 ### Deliberate future work, with reasoning recorded
 - **Web Push** — chosen against for now. Real push needs the Vite PWA plugin moved from `generateSW` to `injectManifest` so the service worker can own `push`/`notificationclick`. Worth doing against a real device, not blind. iOS only delivers push to home-screen-installed PWAs. Email reminders reach the same goal today. (Noted in `DEPLOY.md`.)
@@ -371,7 +418,8 @@ items are done), `DEPLOY.md` (click-path).
 ```bash
 python -m uvicorn main:app --port 8000     # backend (repo root)
 cd app && npm run dev                       # app on :5173
-python -m pytest -q                         # 150 tests, ~2 min
+python -m pytest -q                         # 159 tests, ~2.5 min
+python -m pytest -q -m "not slow"           # skip the MCMC calibration tests
 cd app && npm test                          # 128 frontend tests, ~8s
 cd app && npx tsc -b && npm run build       # NOT `tsc --noEmit` — see §7
 ```
