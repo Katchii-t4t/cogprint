@@ -50,7 +50,11 @@ import math
 from collections import defaultdict
 from typing import Optional
 
-from personalization.priors import prior_effectiveness, prior_stability_days
+from personalization.priors import (
+    RESEARCH_PRIORS,
+    prior_effectiveness,
+    prior_stability_days,
+)
 from schemas.fingerprint import FingerprintProfile
 from schemas.session import KnowledgeMap, MaterialProfile, StudyPlanDay, StudyPlanResponse
 
@@ -139,6 +143,15 @@ def _technique_effectiveness_map(fp: FingerprintProfile) -> dict[str, float]:
         if eff is not None:
             m[t.technique] = eff
     return dict(m)
+
+
+def _observation_counts(fp: FingerprintProfile) -> dict[str, int]:
+    """Sessions logged per technique — the input the optimism bonus decays on.
+
+    A technique absent from `technique_effectiveness` has never been studied
+    and correctly reads as zero.
+    """
+    return {t.technique: int(t.sessions_observed or 0) for t in fp.technique_effectiveness}
 
 
 def _stability_map(fp: FingerprintProfile) -> dict[str, float]:
@@ -235,6 +248,31 @@ _ROTATION_MARGIN = -math.log(_ROTATION_BAND)
 _EVIDENCE_OVERRIDE_RATIO = 3.0
 _BETA = math.log(_EVIDENCE_OVERRIDE_RATIO) / -math.log(_MATERIAL_FLOOR)
 
+# Optimism bonus for techniques the learner has barely tried:
+#
+#     bonus(n) = ALPHA / sqrt(1 + n_sessions_observed)
+#
+# Without it the planner is a pure argmax, and the closed-loop Monte Carlo
+# showed what that costs: it settles on one technique by the second session,
+# samples 1.2 of 7, and lands on the learner's genuinely best technique 0-13%
+# of the time — losing to always-do-practice-testing. The recommendation
+# decides what gets studied, which decides what data exists, which decides the
+# next recommendation. Nothing outside that loop corrects it.
+#
+# Uncertainty, not randomness. An epsilon-greedy control in the same study
+# explored plenty but wasted sessions on techniques already known to be poor.
+# This spends a session on a technique in proportion to how little is known
+# about it, which is the same instinct as the LinUCB bandit already in
+# personalization/linucb.py.
+#
+# ALPHA is derived like BETA, from a stated rule: an *untried* technique should
+# be worth sampling even when the material context does not call for it at all.
+# That means the bonus at n=0 exactly cancels the largest possible material
+# penalty, ALPHA = -BETA·log(floor) = log(_EVIDENCE_OVERRIDE_RATIO). It decays
+# as 1/sqrt(n), so a technique with real evidence behind it stops being
+# displaced by novelty.
+_EXPLORATION_ALPHA = math.log(_EVIDENCE_OVERRIDE_RATIO)
+
 # Applied to the prior stability of a technique this learner has never tried.
 #
 # A population average and a personal measurement are not the same kind of
@@ -282,6 +320,7 @@ def _technique_for_concept(
     best_overall: str,
     eff_map:      dict[str, float],
     day_idx:      int = 0,
+    obs_counts:   dict[str, int] | None = None,
 ) -> str:
     """
     Match a technique to a concept by combining TWO signals:
@@ -303,7 +342,11 @@ def _technique_for_concept(
     measured personal advantage is large enough to overcome a weaker material fit.
     """
     mat_w = _material_weights(difficulty, concept_type)
-    techniques = set(mat_w) | set(eff_map) | {best_overall}
+    counts = obs_counts or {}
+    # Every technique we hold a prior for is a candidate. Restricting this to
+    # the context's list plus whatever has been measured would mean a technique
+    # can only be explored after it has already been studied.
+    techniques = set(mat_w) | set(eff_map) | set(RESEARCH_PRIORS) | {best_overall}
 
     def score(tech: str) -> float:
         measured = eff_map.get(tech)
@@ -311,7 +354,12 @@ def _technique_for_concept(
             stability = prior_stability_days(tech) * _UNMEASURED_DISCOUNT
         else:
             stability = _implied_stability(measured)
-        return math.log(stability) + _BETA * math.log(mat_w.get(tech, _MATERIAL_FLOOR))
+        optimism = _EXPLORATION_ALPHA / math.sqrt(1 + counts.get(tech, 0))
+        return (
+            math.log(stability)
+            + _BETA * math.log(mat_w.get(tech, _MATERIAL_FLOOR))
+            + optimism
+        )
 
     scored = sorted(
         techniques,
@@ -489,6 +537,7 @@ class StudyPlanner:
         best_tech     = _best_technique(fingerprint)
         eff_map       = _technique_effectiveness_map(fingerprint)
         stab_map      = _stability_map(fingerprint)
+        obs_counts    = _observation_counts(fingerprint)
         optimal_dur   = (
             fingerprint.recommended_session_duration_minutes
             or fingerprint.optimal_conditions.optimal_session_duration_minutes
@@ -553,7 +602,7 @@ class StudyPlanner:
             for name in review_candidates:
                 c = concept_lookup[name]
                 tech = _technique_for_concept(
-                    c.difficulty, c.concept_type, best_tech, eff_map, day_idx
+                    c.difficulty, c.concept_type, best_tech, eff_map, day_idx, obs_counts
                 )
                 S    = stab_map.get(tech, _DEFAULT_S)
                 lag  = day_idx - last_studied.get(name, 0)
@@ -575,7 +624,7 @@ class StudyPlanner:
                 c    = introduction_queue.pop(0)
                 name = c.concept
                 tech = _technique_for_concept(
-                    c.difficulty, c.concept_type, best_tech, eff_map, day_idx
+                    c.difficulty, c.concept_type, best_tech, eff_map, day_idx, obs_counts
                 )
                 S    = stab_map.get(tech, _DEFAULT_S)
                 selected.append((name, tech, True, None, S, None))

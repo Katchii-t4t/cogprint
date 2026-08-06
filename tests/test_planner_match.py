@@ -187,6 +187,76 @@ def test_delayed_retention_prefers_the_longer_delay():
     assert _delayed_retention(stats) == 0.6
 
 
+# ── exploration: the loop has to gather evidence to have any ──────────────────
+
+def test_a_mediocre_incumbent_stops_crowding_out_untried_techniques():
+    """Without an optimism term the planner is a pure argmax, and the
+    closed-loop study showed the consequence: it settles by the second session,
+    samples 1.2 techniques of 7, and finds the learner's genuinely best one
+    0-13% of the time. Its own recommendation decides what data will exist, so
+    nothing outside the loop ever corrects it.
+
+    The incumbent here is well sampled but only middling (0.55 at seven days).
+    Forty more sessions of it buy very little; one session of something untried
+    could settle a live question. That is the trade the bonus encodes — note
+    the contrast with the next test, where the incumbent is genuinely strong
+    and must be left alone.
+    """
+    eff = {"active_recall": 0.55}
+    heavily_sampled = {"active_recall": 40}
+
+    without_counts = _technique_for_concept(
+        "intermediate", "conceptual", "active_recall", eff
+    )
+    with_counts = _technique_for_concept(
+        "intermediate", "conceptual", "active_recall", eff, 0, heavily_sampled
+    )
+    assert without_counts == "active_recall"
+    assert with_counts != "active_recall"
+
+
+def test_optimism_does_not_override_a_well_evidenced_winner_forever():
+    """Exploration must decay. A technique with a large measured advantage and
+    plenty of observations should keep being scheduled, or the plan spends the
+    learner's time re-litigating a settled question."""
+    eff = {"active_recall": 0.95, "elaborative_interrogation": 0.30}
+    counts = {"active_recall": 60, "elaborative_interrogation": 60}
+    assert (
+        _technique_for_concept(
+            "intermediate", "conceptual", "active_recall", eff, 0, counts
+        )
+        == "active_recall"
+    )
+
+
+def test_untried_techniques_are_reachable_even_outside_the_context_list():
+    """The optimism bonus at n=0 is set to exactly cancel the largest material
+    penalty, so 'never tried and not what the text calls for' is still worth a
+    session — otherwise those techniques can never generate the evidence that
+    would justify them."""
+    # A learner who has done nothing but active recall, many times.
+    eff = {"active_recall": 0.75}
+    counts = {"active_recall": 50}
+    picks = {
+        _technique_for_concept(
+            "foundational", "factual", "active_recall", eff, day, counts
+        )
+        for day in range(14)
+    }
+    assert len(picks) >= 2
+
+
+def test_counts_absent_means_behaviour_is_unchanged():
+    """Callers that pass no counts (the unit tests above, and any older call
+    site) must see identical behaviour: with every count at zero the bonus is
+    uniform and cancels out of the comparison."""
+    args = ("advanced", "conceptual", "active_recall", {"active_recall": 0.8})
+    for day in range(5):
+        assert _technique_for_concept(*args, day) == _technique_for_concept(
+            *args, day, {}
+        )
+
+
 # ── review urgency must use the learner's own curve ───────────────────────────
 
 def test_review_priority_uses_the_measured_stability():

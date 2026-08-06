@@ -151,7 +151,12 @@ def run_loop(
                 else max(TECHNIQUES, key=prior_effectiveness)
             )
             technique = _technique_for_concept(
-                CONTEXT[0], CONTEXT[1], best_overall, eff_map, session
+                CONTEXT[0],
+                CONTEXT[1],
+                best_overall,
+                eff_map,
+                session,
+                {t: len(v) for t, v in observed.items()},
             )
             if policy == "EXPLORER" and rng.random() < epsilon:
                 technique = TECHNIQUES[rng.integers(len(TECHNIQUES))]

@@ -99,7 +99,7 @@ Violating any of these breaks the product:
 
 ## 4. What is built (state at `022a29a`)
 
-**182 backend tests + 128 frontend tests green. 3 migrations. tsc + build clean.**
+**186 backend tests + 128 frontend tests green. 3 migrations. tsc + build clean.**
 (`npm run lint` does *not* pass — 4 pre-existing errors, see §7.)
 
 ### The full loop works
@@ -170,27 +170,34 @@ library.
    Whichever is canonical, **both numbers must come from it** — a visible
    interval that does not contain its own point estimate reads as a bug and
    costs exactly the calibration trust the brand is built on.
-4. **How much authority does `_CANDIDATES_BY_CONTEXT` deserve?** The scoring
-   ceiling is fixed (Monte Carlo study 1 above), but the underlying question is
-   not settled: that table extrapolates from Dunlosky's *main effects* to
-   technique × material-type *interactions*, which the literature supports far
-   less strongly. It currently ships as a strong prior worth a 3× evidence
-   bar. If the interaction cannot be validated, the honest position is to drop
-   the table and let priors plus measured data decide. Cheap to test once
-   there is data: compare predicted retention with and without the material
-   term in `evaluation/predictive_baseline.py`.
+4. **`_CANDIDATES_BY_CONTEXT` is now the single most expensive assumption in
+   the brain, and it is the weakest-evidenced one.** With exploration working,
+   its cost is measurable. Setting β=0 (material term off) in the closed loop:
 
-5. **The loop never explores, and that is now the binding constraint.**
-   `_technique_for_concept` is deterministic; the LinUCB bandit has
-   exploration but only shapes what is *recommended*, and the ModePicker lets
-   the user override freely. The Monte Carlo prices it: at τ=0.6, exploration
-   is worth +0.037 retention and 3× the rate of finding the learner's best
-   technique — and without it the scoring fix contributes nothing, because the
-   planner samples 1 technique of 7 and has nothing to compare. **This is the
-   highest-value remaining change to the brain.** It is also open finding 6:
-   the same mechanism is what makes any causal claim possible.
+   | τ | PLANNER with table | PLANNER without | DUNLOSKY | ORACLE |
+   |---|---|---|---|---|
+   | 0.0 | 0.728 (4% on best) | **0.827 (85%)** | 0.843 | 0.843 |
+   | 0.3 | 0.755 (22%) | **0.833 (80%)** | 0.835 | 0.845 |
+   | 0.6 | 0.798 (37%) | **0.854 (82%)** | 0.814 | 0.870 |
 
-6. **Technique is self-selected, so nothing here is causal.** The app offers a
+   Without the table the planner finds the learner's best technique ~82% of
+   the time instead of 4–37%, and at τ=0.6 it **beats generic advice**
+   (0.854 vs 0.814) and closes most of the gap to the oracle. That is the
+   product thesis working — and it only happens with the table off.
+
+   **Read this carefully before acting on it.** The simulation builds in that
+   technique × material-type interactions do not exist, so this measures
+   *"if the table is wrong, it costs this much"*, not *"the table is wrong"*.
+   What it does establish is the size of the bet: the table extrapolates from
+   Dunlosky's main effects to interactions the literature supports far less
+   strongly, and if that extrapolation fails it costs ~0.06–0.10 retention and
+   most of the personalisation benefit. **Recommendation: cut β hard (make the
+   table a tie-breaker, not a gate) and settle it empirically** — with real
+   users, `evaluation/predictive_baseline.py` can compare held-out prediction
+   with and without the material term. This is Katchi's call because it is a
+   scientific position, not a constant.
+
+5. **Technique is self-selected, so nothing here is causal.** The app offers a
    technique and the learner picks. "Re-reading works for me" and "I re-read
    material I already half-know" are indistinguishable in the data. The only
    fix is assigning the technique on some fraction of sessions — the LinUCB
@@ -277,11 +284,28 @@ before it was flat. That is the change working exactly as designed: evidence
 is now actionable. PLANNER cannot benefit because it still samples **1.0–1.2
 of 7 techniques** — it has no evidence to act on.
 
-So the two defects are separable, and only one is fixed:
-- *scoring could not act on evidence* — fixed, and EXPLORER is the proof;
-- *the loop never gathers evidence* — *not* fixed. This is open finding 5,
-  and the Monte Carlo now prices it: at τ=0.6 exploration is worth **+0.037
-  retention and 3× the hit rate**. Without it the scoring fix is inert.
+So the two defects were separable:
+- *scoring could not act on evidence* — fixed by log-stability scoring;
+- *the loop never gathered evidence* — fixed by an optimism bonus,
+  `ALPHA / sqrt(1 + sessions_observed)`, with `ALPHA = log 3` set so an
+  **untried** technique is worth a session even when the material context does
+  not call for it at all (the bonus at n=0 exactly cancels the largest material
+  penalty). Uncertainty, not randomness: the ε-greedy control explored plenty
+  but wasted sessions on techniques already known to be poor.
+
+With both in place:
+
+| τ | PLANNER argmax | PLANNER + exploration | EXPLORER (ε-greedy) | DUNLOSKY |
+|---|---|---|---|---|
+| 0.0 | 0.720 (0% on best) | 0.727 (4%) | 0.719 (9%) | 0.843 |
+| 0.3 | 0.710 (3%) | **0.752 (21%)** | 0.737 (20%) | 0.834 |
+| 0.6 | 0.712 (10%) | **0.795 (37%)** | 0.771 (36%) | 0.812 |
+
+Techniques sampled went 1.0–1.2 → **2.5–2.7**, and targeted exploration beats
+random exploration at every τ. The planner now *improves with τ*, which is
+personalisation working. At τ=0 it pays a real exploration cost (0.727 vs
+0.843) — that is the price of not knowing in advance, and it is the correct
+price to pay.
 
 **The cause of the ceiling, and it is assumption-free arithmetic.**
 `score = material_weight × effectiveness`, where effectiveness is 7-day
@@ -561,7 +585,7 @@ items are done), `DEPLOY.md` (click-path).
 ```bash
 python -m uvicorn main:app --port 8000     # backend (repo root)
 cd app && npm run dev                       # app on :5173
-python -m pytest -q                         # 182 tests, ~2.5 min
+python -m pytest -q                         # 186 tests, ~3 min
 python -m pytest -q -m "not slow"           # skip the MCMC calibration tests
 cd app && npm test                          # 128 frontend tests, ~8s
 cd app && npx tsc -b && npm run build       # NOT `tsc --noEmit` — see §7
