@@ -83,6 +83,53 @@ def test_control_group_is_blinded(client):
     assert t_fp.get("bandit_expected_rewards")
     assert not c_fp.get("bandit_expected_rewards")
 
+    # Every measured surface must be empty for control. Listing them one by one
+    # rather than checking the bandit alone: the bandit was the only field this
+    # test used to assert, and a new measured field added later would sail
+    # straight through to a control participant.
+    assert c_fp["technique_effectiveness"] == []
+    assert c_fp["memory_profiles"] == []
+    assert c_fp["technique_stability"] == []
+    assert c_fp["recommended_techniques"] == []
+    assert c_fp["improving_over_time"] is None
+    assert c_fp["avg_score_trend_per_week"] is None
+    assert all(v is None for v in c_fp["optimal_conditions"].values())
+
+
+def test_control_confidence_tracks_effort_so_the_blind_holds(client):
+    """The blind cuts both ways: control must not receive measured signal, and
+    must not receive a *visibly different app* either.
+
+    The client gates its entire fingerprint screen on `confidence != "low"`.
+    While this was pinned to LOW, a control participant who had studied for
+    weeks kept seeing "your fingerprint is growing — processing your first
+    insights", forever, next to an honest "16 sessions" counter — while a
+    treatment participant with byte-identical history saw a full screen. No
+    knowledge of the study design is needed to notice that.
+
+    Confidence is derived from the session count, which control users already
+    receive, so sending it honestly discloses nothing that was being withheld.
+    """
+    ctrl = make_user(client, group="control")
+    _seed_rich_history(client, ctrl, sessions_per_tech=6)  # 18 sessions
+
+    c_fp = client.get(f"/users/{ctrl}/fingerprint").json()["fingerprint"]
+    assert c_fp["session_count"] == 18
+    assert c_fp["confidence"] == "high"
+
+    # ...and still nothing measured underneath it.
+    assert c_fp["technique_effectiveness"] == []
+    assert c_fp["memory_profiles"] == []
+
+
+def test_control_confidence_still_starts_low(client):
+    """A control user with no history is low-confidence for the honest reason,
+    not because the arm is hardcoded."""
+    ctrl = make_user(client, group="control")
+    c_fp = client.get(f"/users/{ctrl}/fingerprint").json()["fingerprint"]
+    assert c_fp["session_count"] == 0
+    assert c_fp["confidence"] == "low"
+
 
 def test_empty_user_returns_generic_fingerprint(client):
     uid = make_user(client, group="treatment")

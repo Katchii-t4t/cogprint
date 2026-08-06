@@ -35,12 +35,22 @@ function vigorFrom(view: InsightView | null): number[] {
 }
 
 /** §2.3 honest uncertainty: turn a technique's Bayesian stability CI (days)
-    into a 7-day retention range via R(7)=e^(−7/S). Returns null when there's
-    no CI to show (e.g. control users' generic profiles — RCT blind intact). */
+    into a 7-day retention range via R(7)=e^(−7/S).
+ *
+ *  `isTreatment` is a required argument on purpose. This is the one number on
+ *  the screen that is read from the raw API response instead of from the view,
+ *  and the backend returns `technique_stability` for every user regardless of
+ *  RCT arm. Left ungated it printed a real 95% interval underneath a control
+ *  user's fabricated percentage — breaking the blind, and visibly contradicting
+ *  the number directly above it. Passing the flag rather than filtering
+ *  upstream keeps the guard at the point of use, where a future call site
+ *  cannot forget it. */
 function retentionBand(
   fpResp: FingerprintResponse | null,
   technique: string,
+  isTreatment: boolean,
 ): { lo: number; hi: number; early: boolean } | null {
+  if (!isTreatment) return null;
   const s = fpResp?.fingerprint.technique_stability?.find(
     (t) => t.technique === technique,
   );
@@ -109,6 +119,9 @@ export default function Grow() {
   const [loading, setLoading] = useState(true);
   const [sharing, setSharing] = useState(false);
   const [name, setName] = useState<string | null>(() => getState().name);
+  // Read once: the RCT arm is assigned at sign-up and never changes within a
+  // session. Every personalised surface below is gated on this.
+  const [isTreatment] = useState(() => (getState().group ?? "treatment") === "treatment");
 
   async function handleShare(v: InsightView) {
     if (sharing) return;
@@ -133,7 +146,6 @@ export default function Grow() {
     if (!userId) { navigate("/"); return; }
 
     const { group } = getState();
-    const isTreatment = (group ?? "treatment") === "treatment";
 
     track("fingerprint_viewed");
 
@@ -160,7 +172,7 @@ export default function Grow() {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [navigate]);
+  }, [navigate, isTreatment]);
 
   if (loading) return <LoadingState />;
 
@@ -358,7 +370,7 @@ export default function Grow() {
               <Section title="Memory stability per technique">
                 <div className="grid grid-cols-2 gap-3">
                   {v.retentionRows.map((r) => {
-                    const band = retentionBand(fpResp, r.technique);
+                    const band = retentionBand(fpResp, r.technique, isTreatment);
                     return (
                       <div
                         key={r.technique}

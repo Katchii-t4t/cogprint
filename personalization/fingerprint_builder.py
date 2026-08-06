@@ -547,7 +547,17 @@ def rebuild_fingerprint(db: Session, user_id: int) -> FingerprintProfile:
     if user.group == StudyGroup.CONTROL:
         profile = FingerprintProfile(
             session_count = n,
-            confidence    = ConfidenceLevel.LOW,
+            # Derived from the session count alone, which control users already
+            # receive — so it discloses nothing measured. It is sent because the
+            # client gates its whole fingerprint screen on confidence != "low":
+            # pinning this to LOW meant a control participant saw "your
+            # fingerprint is growing / processing your first insights" forever,
+            # no matter how much they studied, while a treatment participant
+            # with identical history saw a full screen. That is a visible arm
+            # difference, i.e. a broken blind, and it also made the client's
+            # sham view unreachable in production. Everything below stays
+            # empty: no technique stats, no curves, no posteriors, no bandit.
+            confidence    = _confidence_from_count(n),
             insights      = ["Keep up your regular study routine."],
             data_gaps     = ["Personalisation not enabled for this study group."],
         )
