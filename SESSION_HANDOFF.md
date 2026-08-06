@@ -6,8 +6,8 @@
 > the code good, and the specific traps in this environment that will otherwise
 > cost you an hour rediscovering.
 >
-> Written 2026-08-06 at commit `9173cb5`. When this file and the code disagree,
-> **the code wins** — update this file.
+> Written 2026-08-06 at commit `9173cb5`, updated at `022a29a`. When this file
+> and the code disagree, **the code wins** — update this file.
 
 ---
 
@@ -97,9 +97,9 @@ Violating any of these breaks the product:
 
 ---
 
-## 4. What is built (state at `9173cb5`)
+## 4. What is built (state at `022a29a`)
 
-**148 tests green across 21 files. 3 migrations. tsc + vite build clean.**
+**150 backend tests + 126 frontend tests green. 3 migrations. tsc + build clean.**
 
 ### The full loop works
 paste (or photo, or sample) → knowledge map → 14-day adaptive plan → study mode
@@ -133,8 +133,10 @@ library.
 
 ## 5. What is left
 
-### Tier 4 — polish (~13h, nothing blocking) — **this is the next code work**
-1. **Frontend tests** (~3h) — there are currently **zero**. Vitest + React Testing Library. Highest value here.
+### Tier 4 — polish (~10h, nothing blocking) — **this is the next code work**
+1. ~~**Frontend tests**~~ — **done** (`11eb3c3`, `022a29a`). Vitest + jsdom +
+   React Testing Library, 126 tests. `cd app && npm test`. It found five real
+   bugs; see §7.
 2. **i18n Norwegian** (~3h) — extract UI strings, nb/nn + en, browser-locale default. Pass material language through to card generation. Her first beta cohort is Norwegian.
 3. **a11y audit** (~2h) — WCAG-AA contrast on the dark theme, ARIA for the SVG fingerprint and icon-only buttons, keyboard nav + visible focus. (`prefers-reduced-motion` is already done.)
 4. **Edit a flashcard** (~2h) — currently a bad card can only be flagged, not corrected. Store the correction and prefer it.
@@ -147,6 +149,25 @@ library.
 - Privacy policy + ToS text (the *endpoints* exist).
 - Resend account for real email; Sentry DSN. Both optional — the app works without.
 - Recruiting 10–20 beta users.
+
+### Open findings from the test arc — decisions for Katchi, not defects
+Both were found by rendering the app against a running backend. Neither is
+fixed, because both are research-design calls rather than bugs:
+
+1. **The blind is still not symmetric.** Treatment gets a memory-forecast card
+   and an archetype badge; control has no equivalent for either, so the two
+   screens are still distinguishable side by side. The consistent fix is a
+   *sham* forecast and archetype — fabricated, deterministic, seeded by user
+   id, exactly as the sham insights already work. ~2h. Recommended before any
+   participant is recruited.
+2. **Two estimators are shown as one claim.** On the treatment fingerprint,
+   re-reading reads "26% at 7 days" with "likely 0–10%" underneath. The
+   headline is the Ebbinghaus OLS fit (`memory_profiles`); the band is the
+   Bayesian posterior (`technique_stability`). They are different estimators,
+   and here they disagree enough that the interval excludes the point estimate.
+   Whichever is canonical, **both numbers must come from it** — a visible
+   interval that does not contain its own point estimate reads as a bug and
+   costs exactly the calibration trust the brand is built on.
 
 ### Deliberate future work, with reasoning recorded
 - **Web Push** — chosen against for now. Real push needs the Vite PWA plugin moved from `generateSW` to `injectManifest` so the service worker can own `push`/`notificationclick`. Worth doing against a real device, not blind. iOS only delivers push to home-screen-installed PWAs. Email reminders reach the same goal today. (Noted in `DEPLOY.md`.)
@@ -192,6 +213,47 @@ check it in the browser. Two real bugs in this arc were found by smoke-testing,
 ---
 
 ## 7. Hard-won lessons — do not relearn these
+
+### Frontend tests: how they are set up, and what they caught
+`app/vitest.config.ts` is deliberately **separate** from `vite.config.ts` — the
+PWA plugin has no role in a jsdom run. Two settings there are load-bearing:
+
+- **`env: { TZ: "Europe/Oslo" }`.** The streak is computed in local calendar
+  days, so under CI's default UTC the daylight-saving cases cannot fail no
+  matter what the code does. One test asserts the pin took effect.
+- **Component tests need `vi.useFakeTimers({ shouldAdvanceTime: true })`.**
+  Testing Library's `findBy*`/`waitFor` poll on real timers; under plain fake
+  timers every async query hangs until the test times out.
+
+Use `blindedFingerprint()` from `src/test/fixtures.ts` for any control-arm
+test. Using the measured fixture asserts against a payload the server will
+never send — that is exactly how the gating bug below stayed hidden.
+
+Five real bugs came out of writing these, none of which the 148 green backend
+tests could see:
+1. **The RCT blind was broken in production.** `fingerprint_builder` pinned
+   control users to `confidence=LOW` forever, and the client gates its whole
+   fingerprint screen on `confidence !== "low"` — so control saw "your
+   fingerprint is growing" permanently while treatment saw a full screen, and
+   `insights.ts`'s entire sham view never rendered at all. Confidence is now
+   derived from the session count for both arms (it discloses nothing measured;
+   the count is already sent). **This is the one to remember: the sham view is
+   only reachable because of that one line.**
+2. `retentionBand()` read `technique_stability` off the raw API response rather
+   than the sham view — a leak by construction. Now gated on treatment.
+3. `store.ts` spread a module-level `EMPTY`, so every `getState()` handed out
+   the *same* `recents` array; one push poisoned the default session-wide.
+4. `streak.ts` tested "is b the next day" with an exact 86,400,000 ms diff
+   between local midnights — a DST day is 23 or 25 hours, so the longest streak
+   reset every March and October for every Norwegian user.
+5. `currentHour()` bucketed 00:00–04:59 as "morning". The client is the only
+   place `time_of_day` is decided, so 2am sessions were dragging night owls'
+   `best_time_of_day` the wrong way.
+
+Also: **`npx tsc --noEmit` in `app/` was a no-op.** `tsconfig.json` is a
+solution file (`files: []` + references), so without `-b` it resolves zero
+inputs and exits 0. CI's type check was checking nothing; types were only ever
+verified as a side effect of `npm run build`. Now `npx tsc -b`.
 
 ### The test suite is not sufficient
 Two genuine bugs got through green tests:
@@ -293,8 +355,9 @@ items are done), `DEPLOY.md` (click-path).
 ```bash
 python -m uvicorn main:app --port 8000     # backend (repo root)
 cd app && npm run dev                       # app on :5173
-python -m pytest -q                         # 148 tests, ~2 min
-cd app && npx tsc --noEmit && npm run build
+python -m pytest -q                         # 150 tests, ~2 min
+cd app && npm test                          # 126 frontend tests, ~7s
+cd app && npx tsc -b && npm run build       # NOT `tsc --noEmit` — see §7
 ```
 
 **Env vars, all optional:** `ANTHROPIC_API_KEY` (better cards + OCR),
@@ -311,10 +374,11 @@ to move or delete.
 
 ## 10. If you do one thing
 
-Tier 4 item 1 — **frontend tests**. There are zero, the app has grown a lot this
-arc, and CI already runs `tsc` and `build` but can't catch a broken render or a
-regressed flow. That is the largest remaining gap between "it works" and "it
-keeps working".
+Frontend tests are done. The next-most-valuable code work is **finishing the
+blind** (§5, open finding 1): a sham forecast and archetype, so the two arms'
+screens are actually indistinguishable. Everything else in Tier 4 is polish;
+that one decides whether the study can be run at all.
 
-Then tell her, plainly, that deploy is still the thing standing between her and
-knowing whether any of this is true.
+But the honest answer has not changed: **deploy is still the thing standing
+between her and knowing whether any of this is true.** No amount of test
+coverage moves validation off 0%.
