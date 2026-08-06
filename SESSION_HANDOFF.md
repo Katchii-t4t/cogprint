@@ -99,7 +99,7 @@ Violating any of these breaks the product:
 
 ## 4. What is built (state at `022a29a`)
 
-**159 backend tests + 128 frontend tests green. 3 migrations. tsc + build clean.**
+**170 backend tests + 128 frontend tests green. 3 migrations. tsc + build clean.**
 (`npm run lint` does *not* pass — 4 pre-existing errors, see §7.)
 
 ### The full loop works
@@ -154,16 +154,14 @@ library.
 - Resend account for real email; Sentry DSN. Both optional — the app works without.
 - Recruiting 10–20 beta users.
 
-### Open findings from the test arc — decisions for Katchi, not defects
-Both were found by rendering the app against a running backend. Neither is
-fixed, because both are research-design calls rather than bugs:
-
+### Open findings — decisions for Katchi, not defects
 1. **The blind is still not symmetric.** Treatment gets a memory-forecast card
    and an archetype badge; control has no equivalent for either, so the two
    screens are still distinguishable side by side. The consistent fix is a
    *sham* forecast and archetype — fabricated, deterministic, seeded by user
    id, exactly as the sham insights already work. ~2h. Recommended before any
-   participant is recruited.
+   participant is recruited. (Deprioritised 2026-08-06: the near-term focus is
+   the consumer product, not the trial.)
 2. **Two estimators are shown as one claim.** On the treatment fingerprint,
    re-reading reads "26% at 7 days" with "likely 0–10%" underneath. The
    headline is the Ebbinghaus OLS fit (`memory_profiles`); the band is the
@@ -172,6 +170,37 @@ fixed, because both are research-design calls rather than bugs:
    Whichever is canonical, **both numbers must come from it** — a visible
    interval that does not contain its own point estimate reads as a bug and
    costs exactly the calibration trust the brand is built on.
+3. **Technique is self-selected, so nothing here is causal.** The app offers a
+   technique and the learner picks. "Re-reading works for me" and "I re-read
+   material I already half-know" are indistinguishable in the data. The only
+   fix is assigning the technique on some fraction of sessions — the LinUCB
+   bandit has exploration built in, but it only shapes what is *recommended*;
+   the ModePicker still lets the user override freely. If personalisation is
+   the product, roughly 20% of sessions need to be assigned. Real friction,
+   real decision.
+
+### The plan now follows the fingerprint (2026-08-06)
+An A/B probe — two learners, same material, opposite measured histories — found
+the fingerprint personalising correctly while the plan barely did. Reproduce it
+any time; the decisive comparison is whether the two learners' 14-day plans
+differ, and whether either differs from a cold-start plan.
+
+What was wrong, and what changed:
+
+| symptom | cause | fix |
+|---|---|---|
+| A learner measured at 0.90 on re-reading was told it was their best technique, while the plan scheduled it 0/14 days | `_CANDIDATES_BY_CONTEXT` lists re_reading in **no** context, so it was pinned at the material floor 0.45 while ranked techniques scored up to 1.0 — a hard gate no evidence could pass | floor 0.45 → **0.62**, ranks `[1.0, .72, .55]` → **`[1.0, .85, .72]`**. Material now spans 1.6×, measured effectiveness up to 2.3×, so evidence can win |
+| A learner with 20 sessions got a plan byte-identical to a brand-new user's | plan collapsed to argmax of a deterministic score | rotate across days among techniques within **85%** of the day's best (`_ROTATION_BAND`) — variety only where the model is indifferent |
+| Cold-start "recommended techniques" put mind_maps and re_reading at positions 2–3 | at n=0 every bandit arm ties and `sorted` is stable, so the order was set iteration order; `priors.py` fed the planner but never this field | blend toward the research prior as n→0, and use the prior as final tie-break |
+| Fluency illusion could drive technique choice | `avg_retention_7d or avg_retention_24h or avg_immediate_score` — immediate score measures encoding, not forgetting, and flatters exactly the techniques the literature warns about. The `or` chain also treated a genuine 0.0 retention as missing | `_delayed_retention()`: delayed checks only, explicit `is not None` |
+| Advice text named "active recall + spaced repetition" regardless of the plan below it | hardcoded string that survived the move to material-aware matching | names the techniques the plan actually contains |
+
+One knob is a deliberate stand-in: `_UNMEASURED_DISCOUNT = 0.9` on techniques
+still scored by prior. Widening the floor let an *unmeasured* high-prior
+technique beat one the learner had been measured on, which is wrong — a
+population average and a personal measurement are different claims. The proper
+fix is passing the posterior into the planner instead of a bare float, so
+sample size counts; `eff_map` currently cannot tell two sessions from twenty.
 
 ### The validation harness (`evaluation/predictive_baseline.py`)
 Answers "does personalisation actually predict better?" offline, from the
@@ -418,7 +447,7 @@ items are done), `DEPLOY.md` (click-path).
 ```bash
 python -m uvicorn main:app --port 8000     # backend (repo root)
 cd app && npm run dev                       # app on :5173
-python -m pytest -q                         # 159 tests, ~2.5 min
+python -m pytest -q                         # 170 tests, ~2.5 min
 python -m pytest -q -m "not slow"           # skip the MCMC calibration tests
 cd app && npm test                          # 128 frontend tests, ~8s
 cd app && npx tsc -b && npm run build       # NOT `tsc --noEmit` — see §7

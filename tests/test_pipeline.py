@@ -131,6 +131,59 @@ def test_control_confidence_still_starts_low(client):
     assert c_fp["confidence"] == "low"
 
 
+def test_cold_start_recommendations_follow_the_research_ranking(client):
+    """A brand-new user's recommended techniques must be the literature's
+    ordering, not an accident of dictionary iteration.
+
+    At n=0 every LinUCB arm returns the same unfitted value and there is no
+    retention data, so every technique scored identically and `sorted` — being
+    stable — returned whatever order the underlying set happened to produce. In
+    practice that put mind_maps and re_reading, the two lowest-utility
+    techniques in Dunlosky, at positions 2 and 3 of the first thing a new user
+    is ever shown. priors.py existed to prevent exactly this, but only ever fed
+    the planner, never this field.
+    """
+    uid = make_user(client, group="treatment")
+    fp = client.post(f"/users/{uid}/fingerprint/rebuild").json()["fingerprint"]
+
+    top3 = fp["recommended_techniques"][:3]
+    assert top3 == ["practice_testing", "spaced_repetition", "active_recall"]
+    # And the low-utility techniques are nowhere near the top.
+    assert "re_reading" not in top3
+    assert "mind_maps" not in top3
+
+
+def test_cold_start_plan_is_not_fourteen_identical_days(client):
+    """Variety where the model is indifferent — a plan that repeats one
+    technique every day for a fortnight is bad practice and reads as broken."""
+    uid = make_user(client, group="treatment")
+    material = client.post("/materials/analyze", json={
+        "title": "Photosynthesis",
+        "raw_text": (
+            "Photosynthesis converts light energy into chemical energy. "
+            "Chlorophyll in the thylakoid membrane absorbs photons. The Calvin "
+            "cycle fixes carbon dioxide into glucose. Stomata regulate gas "
+            "exchange. Rubisco catalyses carbon fixation. Glycolysis splits "
+            "glucose into pyruvate. The electron transport chain generates a "
+            "proton gradient across the inner mitochondrial membrane."
+        ),
+    }).json()
+    plan = client.post(
+        f"/users/{uid}/study-plan?material_id={material['material_id']}&total_days=14"
+    ).json()
+
+    techniques = {d["technique"] for d in plan["days"] if d["session_duration_minutes"] > 0}
+    assert len(techniques) > 1, f"plan collapsed to a single technique: {techniques}"
+
+    # The advice text must describe the plan printed underneath it. It used to
+    # name a hardcoded pair that material-aware matching had made obsolete.
+    advice = plan["general_advice"]
+    for technique in techniques:
+        assert technique.replace("_", " ") in advice, (
+            f"advice does not mention {technique}, which the plan uses: {advice}"
+        )
+
+
 def test_empty_user_returns_generic_fingerprint(client):
     uid = make_user(client, group="treatment")
     fp = client.get(f"/users/{uid}/fingerprint").json()["fingerprint"]

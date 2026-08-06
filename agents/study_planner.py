@@ -95,12 +95,29 @@ def _best_technique(fp: FingerprintProfile) -> str:
     if fp.recommended_techniques:
         return fp.recommended_techniques[0]
     if fp.technique_effectiveness:
-        # Sort by 7d retention, falling back to 24h → immediate
-        def key(t):
-            return t.avg_retention_7d or t.avg_retention_24h or t.avg_immediate_score or 0.0
-        best = max(fp.technique_effectiveness, key=key)
+        best = max(fp.technique_effectiveness, key=lambda t: _delayed_retention(t) or 0.0)
         return best.technique
     return _DEFAULT_TECHNIQUE
+
+
+def _delayed_retention(t) -> float | None:
+    """A technique's measured *delayed* retention, or None if it has none yet.
+
+    Immediate quiz score is deliberately excluded. It measures encoding, not
+    forgetting, and it is exactly where the fluency illusion lives: re-reading
+    feels — and immediately tests — better than it retains. Letting it stand in
+    for retention would systematically favour the techniques the literature
+    warns about, using the one number most biased in their favour.
+
+    Explicit `is not None` rather than `or`: a genuine measured retention of
+    0.0 is data, and the previous `a or b or c` chain silently skipped it and
+    fell through to the next, weaker source.
+    """
+    if t.avg_retention_7d is not None:
+        return float(t.avg_retention_7d)
+    if t.avg_retention_24h is not None:
+        return float(t.avg_retention_24h)
+    return None
 
 
 def _technique_effectiveness_map(fp: FingerprintProfile) -> dict[str, float]:
@@ -118,9 +135,9 @@ def _technique_effectiveness_map(fp: FingerprintProfile) -> dict[str, float]:
         )
     }
     for t in fp.technique_effectiveness:
-        eff = t.avg_retention_7d or t.avg_retention_24h or t.avg_immediate_score
+        eff = _delayed_retention(t)
         if eff is not None:
-            m[t.technique] = float(eff)
+            m[t.technique] = eff
     return dict(m)
 
 
@@ -168,13 +185,47 @@ _CANDIDATES_BY_CONTEXT: dict[tuple[str, str], list[str]] = {
     ("advanced",     "procedural"):  ["interleaving", "practice_testing", "elaborative_interrogation"],
 }
 
-# Rank → material weight. Descending, with a non-trivial FLOOR for techniques the
-# context doesn't call out, so a learner with a strong *measured* advantage in some
-# other technique can still surface it. This is the honesty guardrail: material
-# type is a MODULATION on top of a strong general prior, not a hard gate. The
-# general finding (testing/spacing win broadly) stays dominant; material tilts it.
-_RANK_WEIGHTS = [1.0, 0.72, 0.55]
-_MATERIAL_FLOOR = 0.45
+# Rank → material weight. Descending, with a FLOOR for techniques the context
+# doesn't call out, so a learner with a strong *measured* advantage in some other
+# technique can still surface it. This is the honesty guardrail: material type is
+# a MODULATION on top of a strong general prior, not a hard gate.
+#
+# The numbers previously contradicted that sentence. With a floor of 0.45 the
+# material term spanned 2.2x, which is wider than the spread in measured
+# effectiveness — and since re_reading and mind_maps appear in few or no context
+# lists, they were pinned at the floor and could never be scheduled no matter
+# what a learner's own retention data said. Meanwhile the fingerprint screen
+# happily told that learner re-reading was their best technique. Two surfaces,
+# two answers.
+#
+# At a floor of 0.62 the material term spans 1.6x, so it still decides among
+# techniques the learner has no data on (the cold-start case, where it should
+# decide), while a clear measured advantage — up to ~2.3x — can outweigh it.
+_RANK_WEIGHTS = [1.0, 0.85, 0.72]
+_MATERIAL_FLOOR = 0.62
+
+# A technique scoring within this fraction of the day's best is treated as
+# equally good, and the plan rotates among them across days. Rotation only ever
+# happens inside that indifference band: a clearly better technique is never
+# given up for variety. See _technique_for_concept.
+_ROTATION_BAND = 0.85
+
+# Applied to a technique whose effectiveness is still the research prior rather
+# than this learner's own delayed retention.
+#
+# Without it, widening the material floor had a side effect worth naming: an
+# *unmeasured* technique carrying a high population prior (practice testing,
+# 0.85) beat a technique this learner had actually been measured at (0.70).
+# A population average and a personal measurement are not the same kind of
+# claim, and scoring them on one scale treats them as if they were.
+#
+# Limitation, stated rather than hidden: this is a flat stand-in for proper
+# uncertainty weighting. eff_map carries point estimates with no sample size,
+# so the planner cannot tell two sessions from twenty, and a measurement from
+# two sessions gets the same standing as one from twenty. The real fix is to
+# pass the posterior (which fingerprint_builder already computes) into the
+# planner instead of a bare float.
+_UNMEASURED_DISCOUNT = 0.9
 
 
 def _material_weights(difficulty: str, concept_type: str) -> dict[str, float]:
@@ -194,6 +245,7 @@ def _technique_for_concept(
     concept_type: str,
     best_overall: str,
     eff_map:      dict[str, float],
+    day_idx:      int = 0,
 ) -> str:
     """
     Match a technique to a concept by combining TWO signals:
@@ -217,12 +269,33 @@ def _technique_for_concept(
     mat_w = _material_weights(difficulty, concept_type)
     techniques = set(mat_w) | set(eff_map) | {best_overall}
 
-    def score(tech: str) -> tuple[float, bool, str]:
-        s = mat_w.get(tech, _MATERIAL_FLOOR) * eff_map.get(tech, prior_effectiveness(tech))
-        # Deterministic tie-break: prefer the learner's global best, then name.
-        return (s, tech == best_overall, tech)
+    def score(tech: str) -> float:
+        measured = eff_map.get(tech)
+        if measured is None:
+            effectiveness = prior_effectiveness(tech) * _UNMEASURED_DISCOUNT
+        else:
+            effectiveness = measured
+        return mat_w.get(tech, _MATERIAL_FLOOR) * effectiveness
 
-    return max(techniques, key=score)
+    scored = sorted(
+        techniques,
+        # Deterministic ordering: score, then the learner's global best, then
+        # name — so an identical fingerprint always yields an identical plan.
+        key=lambda t: (score(t), t == best_overall, t),
+        reverse=True,
+    )
+    top = score(scored[0])
+    if top <= 0:
+        return scored[0]
+
+    # Rotate across days among techniques the model cannot meaningfully
+    # separate. Fourteen identical days is bad practice (varied practice is
+    # itself a documented benefit) and bad product, but buying variety by
+    # scheduling a technique the model rates clearly worse would be trading the
+    # user's time for visual interest. The band is the compromise: vary only
+    # where varying costs nothing.
+    band = [t for t in scored if score(t) >= _ROTATION_BAND * top]
+    return band[day_idx % len(band)]
 
 
 # ── Priority score ────────────────────────────────────────────────────────────
@@ -439,7 +512,9 @@ class StudyPlanner:
             scored_reviews = []
             for name in review_candidates:
                 c = concept_lookup[name]
-                tech = _technique_for_concept(c.difficulty, c.concept_type, best_tech, eff_map)
+                tech = _technique_for_concept(
+                    c.difficulty, c.concept_type, best_tech, eff_map, day_idx
+                )
                 S    = stab_map.get(tech, _DEFAULT_S)
                 lag  = day_idx - last_studied.get(name, 0)
                 R    = _retention(lag, S)
@@ -459,7 +534,9 @@ class StudyPlanner:
             while new_slots > 0 and introduction_queue:
                 c    = introduction_queue.pop(0)
                 name = c.concept
-                tech = _technique_for_concept(c.difficulty, c.concept_type, best_tech, eff_map)
+                tech = _technique_for_concept(
+                    c.difficulty, c.concept_type, best_tech, eff_map, day_idx
+                )
                 S    = stab_map.get(tech, _DEFAULT_S)
                 selected.append((name, tech, True, None, S, None))
                 seen.add(name)
@@ -547,7 +624,7 @@ class StudyPlanner:
             resume_note
             + material_profile.summary
             + "  "
-            + _build_general_advice(fingerprint, confidence, total_days)
+            + _build_general_advice(fingerprint, confidence, total_days, plan_days)
         )
 
         return StudyPlanResponse(
@@ -563,12 +640,20 @@ def _build_general_advice(
     fp:         FingerprintProfile,
     confidence: object,
     total_days: int,
+    plan_days:  list[StudyPlanDay],
 ) -> str:
     parts: list[str] = []
 
     if str(confidence) in ("low", "ConfidenceLevel.LOW"):
+        # Name the techniques this plan actually contains rather than a fixed
+        # pair. The hardcoded "active recall + spaced repetition" survived the
+        # move to material-aware matching and had started describing a plan
+        # that no longer existed — the screen said one thing and the fourteen
+        # days below it said another.
+        used = sorted({d.technique for d in plan_days if d.session_duration_minutes > 0})
+        named = " + ".join(t.replace("_", " ") for t in used) or "evidence-based defaults"
         parts.append(
-            "This plan uses evidence-based defaults (active recall + spaced repetition) "
+            f"This plan uses research-backed defaults ({named}) "
             "since fewer than 5 sessions have been recorded. "
             "Complete more sessions and retention checks to unlock fully personalised scheduling."
         )

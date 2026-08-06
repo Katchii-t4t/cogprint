@@ -14,10 +14,14 @@ Two behaviours matter:
 """
 
 from agents.study_planner import (
+    _ROTATION_BAND,
+    _delayed_retention,
     _material_weights,
+    _technique_effectiveness_map,
     _technique_for_concept,
     _material_profile,
 )
+from schemas.fingerprint import FingerprintProfile, TechniqueStats
 from schemas.session import KnowledgeConcept, KnowledgeMap
 
 
@@ -71,6 +75,115 @@ def test_material_still_wins_when_personal_edge_is_small():
     eff = {"mind_maps": 0.75, "spaced_repetition": 0.70}
     tech = _technique_for_concept("foundational", "factual", best_overall="mind_maps", eff_map=eff)
     assert tech == "spaced_repetition"
+
+
+# ── no technique may be structurally unreachable ──────────────────────────────
+
+def _stats(technique, **kw):
+    base = dict(
+        technique=technique, sessions_observed=6, avg_immediate_score=None,
+        avg_retention_24h=None, avg_retention_7d=None, relative_effectiveness=None,
+    )
+    base.update(kw)
+    return TechniqueStats(**base)
+
+
+def test_a_technique_in_no_context_list_can_still_be_scheduled():
+    """re_reading appears in none of the context candidate lists, so it only
+    ever gets the material floor. It must still be reachable for a learner
+    whose own delayed retention says it works.
+
+    This was the concrete failure: a learner measured at 0.90 retention on
+    re-reading was told by the fingerprint screen that re-reading was their
+    best technique, while the plan scheduled it zero times out of fourteen and
+    filled the days with a technique they had never tried. Two surfaces, two
+    answers, and the one the user follows was the wrong one.
+    """
+    eff = {"re_reading": 0.90, "spaced_repetition": 0.43, "practice_testing": 0.42}
+    tech = _technique_for_concept(
+        "foundational", "factual", best_overall="re_reading", eff_map=eff
+    )
+    assert tech == "re_reading"
+
+
+def test_an_unmeasured_prior_does_not_beat_a_measured_result():
+    """A population average and this learner's own measurement are different
+    kinds of claim. Practice testing carries the highest prior of all, but a
+    technique the learner has actually been measured on should not lose to a
+    technique they have never tried on the strength of the literature alone."""
+    eff = {"spaced_repetition": 0.70}
+    tech = _technique_for_concept(
+        "foundational", "factual", best_overall="spaced_repetition", eff_map=eff
+    )
+    assert tech == "spaced_repetition"
+
+
+# ── variety, but only where the model is indifferent ──────────────────────────
+
+def test_plan_rotates_across_days_when_techniques_score_alike():
+    """Fourteen identical days is bad practice and bad product."""
+    picks = {
+        _technique_for_concept("foundational", "factual", "spaced_repetition", {}, day)
+        for day in range(14)
+    }
+    assert len(picks) > 1
+
+
+def test_rotation_never_reaches_below_the_band():
+    """Variety is bought only where it costs nothing. A technique the model
+    rates clearly worse must never be scheduled just to look varied."""
+    eff = {"spaced_repetition": 0.90, "mind_maps": 0.20, "re_reading": 0.15}
+    picks = {
+        _technique_for_concept("foundational", "factual", "spaced_repetition", eff, day)
+        for day in range(30)
+    }
+    assert "mind_maps" not in picks
+    assert "re_reading" not in picks
+
+
+def test_rotation_is_deterministic_for_a_given_day():
+    """Same fingerprint, same day, same plan — reloading must not reshuffle."""
+    args = ("intermediate", "conceptual", "active_recall", {"active_recall": 0.8})
+    assert all(
+        _technique_for_concept(*args, day) == _technique_for_concept(*args, day)
+        for day in range(10)
+    )
+
+
+def test_rotation_band_is_a_fraction_not_a_free_for_all():
+    assert 0.5 < _ROTATION_BAND < 1.0
+
+
+# ── only delayed retention counts as evidence ─────────────────────────────────
+
+def test_immediate_score_is_not_treated_as_retention():
+    """Immediate quiz score measures encoding, not forgetting — and it is
+    exactly where the fluency illusion lives. Re-reading feels, and immediately
+    tests, better than it retains. Letting it stand in for retention would
+    favour precisely the techniques the literature warns about, using the
+    number most biased in their favour."""
+    assert _delayed_retention(_stats("re_reading", avg_immediate_score=0.99)) is None
+
+    fp = FingerprintProfile(
+        session_count=8,
+        technique_effectiveness=[_stats("re_reading", avg_immediate_score=0.99)],
+    )
+    # Falls back to the research prior for re_reading (0.50), not to 0.99.
+    assert _technique_effectiveness_map(fp)["re_reading"] == 0.50
+
+
+def test_a_measured_zero_is_data_not_a_missing_value():
+    """`a or b or c` treats a genuine 0.0 as absent and silently falls through
+    to a weaker source. Total failure to retain is a real, informative result."""
+    assert _delayed_retention(_stats("re_reading", avg_retention_7d=0.0)) == 0.0
+    assert _delayed_retention(
+        _stats("re_reading", avg_retention_7d=0.0, avg_retention_24h=0.8)
+    ) == 0.0
+
+
+def test_delayed_retention_prefers_the_longer_delay():
+    stats = _stats("active_recall", avg_retention_7d=0.6, avg_retention_24h=0.85)
+    assert _delayed_retention(stats) == 0.6
 
 
 # ── material profile aggregation ──────────────────────────────────────────────

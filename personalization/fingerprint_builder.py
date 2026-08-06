@@ -32,7 +32,11 @@ from sqlalchemy.orm import Session
 from database import CognitiveFingerprint, RetentionCheck, StudyGroup, StudySession, User, utcnow
 from personalization.forgetting_curve import compute_memory_profiles
 from personalization.hierarchical_memory import HierarchicalMemoryModel
-from personalization.priors import prior_stability_days
+from personalization.priors import (
+    RESEARCH_PRIORS,
+    prior_effectiveness,
+    prior_stability_days,
+)
 from personalization.linucb import (
     ALL_TECHNIQUES,
     LinUCBRecommender,
@@ -489,25 +493,45 @@ def _rank_recommended_techniques(
     With ≥10 sessions: trust the LinUCB expected-reward ranking (accounts
     for the user's conditions).
 
-    With < 10 sessions: blend 60% bandit / 40% raw 7d retention average
-    so the recommendation is stable when the bandit is under-explored.
+    With < 10 sessions: blend bandit and raw 7d retention, and blend *that*
+    toward the research priors as the session count approaches zero.
+
+    The prior term is not cosmetic. At n=0 every LinUCB arm returns the same
+    unfitted value and raw retention is empty, so every technique scored
+    identically and `sorted` — being stable — returned whatever order the
+    underlying set happened to iterate in. A brand-new user was shown an
+    essentially arbitrary ranking; in practice it put mind_maps and re_reading,
+    the two lowest-utility techniques in the literature, at positions 2 and 3.
+    priors.py existed precisely to prevent that, but it only ever reached the
+    planner, never this field — which is the one the fingerprint screen reads.
     """
     raw_7d = {
         t.technique: t.avg_retention_7d or t.avg_retention_24h or t.avg_immediate_score or 0.0
         for t in tech_stats
     }
 
-    all_techs = list(set(list(bandit_scores.keys()) + list(raw_7d.keys())))
+    # Include every technique we hold a prior for, so a cold-start ranking is
+    # complete rather than limited to whatever the bandit happens to know about.
+    all_techs = list(
+        set(bandit_scores) | set(raw_7d) | set(RESEARCH_PRIORS)
+    )
 
     def blended_score(k: str) -> float:
+        if n >= 10:
+            return bandit_scores.get(k, 0.0)
         b = bandit_scores.get(k, 0.0)
         r = raw_7d.get(k, 0.0)
-        if n >= 10:
-            return b
-        w = min(1.0, n / 10.0)  # linearly interpolate 0→1 as n grows to 10
-        return w * b + (1.0 - w) * r
+        w = min(1.0, n / 10.0)          # trust the bandit more as n grows
+        evidence = w * b + (1.0 - w) * r
+        trust = min(1.0, n / 5.0)       # trust *any* personal evidence at all
+        return trust * evidence + (1.0 - trust) * prior_effectiveness(k)
 
-    return sorted(all_techs, key=blended_score, reverse=True)
+    # Prior as the final tie-break too: with a handful of sessions two
+    # techniques can still score identically, and "alphabetical" is not a
+    # defensible reason to tell someone to use mind maps.
+    return sorted(
+        all_techs, key=lambda k: (blended_score(k), prior_effectiveness(k)), reverse=True
+    )
 
 
 # ── Main entry point ───────────────────────────────────────────────────────────
