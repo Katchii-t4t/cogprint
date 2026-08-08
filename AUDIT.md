@@ -55,19 +55,24 @@ names the commit that closed it.
 | OPS-002 missing indexes | **DONE** | `7801f62` |
 | OPS-008 health ignores the database | **DONE** | `7801f62` |
 | FE-003 no error boundary | **DONE** | `2416ff4` |
+| SEC-010 npm advisories | **DONE** | `cb2e415` |
+| COR-006 lint failing, not in CI | **DONE** | `cb2e415` |
+| TEST-001 lint + audit not gated in CI | **DONE** | `cb2e415` |
+| COR-002 two estimators shown as one claim | **DONE** | `80b7363` |
+| SEC-006 share codes mintable / eternal | partly — minting fixed by SEC-001; expiry open | `aa0ea9e` |
 | SEC-003 rate limiter per-process | open | — |
 | SEC-005 events accept any user_id | open | — |
-| SEC-006 share codes mintable / eternal | partly — minting fixed by SEC-001; expiry open | `aa0ea9e` |
 | SEC-007 CORS allow_credentials | open | — |
 | SEC-008 Docker runs as root | open | — |
 | SEC-009 no dependency pinning | open | — |
-| SEC-010 npm advisories | open | — |
 | COR-001 advice text still hardcodes claims | open | — |
-| COR-002 two estimators shown as one claim | open | — |
 | COR-003 no sample size in eff_map | open | — |
 | COR-004 non-deterministic rebuild | open | — |
-| COR-006 lint failing, not in CI | open | — |
 | everything else | open | — |
+
+**Commercialisation gate: 8 of 11 code items cleared.** Remaining code work:
+SEC-009 (pin dependencies), OPS-005 (backups with a tested restore), TEST-002
+(one end-to-end journey test). OPS-001 (deploy) and LEGAL-001 are Katchi's.
 
 ---
 
