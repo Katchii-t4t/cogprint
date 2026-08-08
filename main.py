@@ -4,6 +4,7 @@ import json
 import logging
 import os
 from collections import defaultdict
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from typing import List, Optional
 
@@ -14,6 +15,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from auth import (
+    assert_production_config,
     bearer_token,
     rate_limit_email,
     rate_limit_ocr,
@@ -134,9 +136,20 @@ app.add_middleware(
 )
 
 
-@app.on_event("startup")
-def startup():
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    """Startup checks. `on_event` is deprecated in favour of this.
+
+    The config assertion runs before the first request rather than at import,
+    so tests can construct the app freely and a misconfigured production
+    deploy still fails at boot.
+    """
+    assert_production_config()
     init_db()
+    yield
+
+
+app.router.lifespan_context = lifespan
 
 
 def _record_rebuild_status(

@@ -29,6 +29,31 @@ from typing import Deque, Dict, Optional
 from fastapi import Header, HTTPException, Request, status
 
 API_KEY_ENV = "COGPRINT_API_KEY"
+ENV_VAR = "COGPRINT_ENV"
+
+
+def is_production() -> bool:
+    return os.getenv(ENV_VAR, "dev").strip().lower() in ("prod", "production")
+
+
+def assert_production_config() -> None:
+    """Refuse to start a production instance with authentication disabled.
+
+    `require_api_key` is a no-op when no key is set, which is the right default
+    for local work and keeps the zero-config promise. It is the wrong default
+    for a deploy: forgetting one environment variable silently exposes the
+    full participant list, the CSV export, the analytics funnel and the
+    reminder trigger, with a green health check and no warning anywhere.
+
+    Failing at startup is deliberate. A misconfigured instance that refuses to
+    boot is an obvious, immediate problem; one that boots and serves everyone's
+    data is a quiet one that can run for months.
+    """
+    if is_production() and not os.getenv(API_KEY_ENV):
+        raise RuntimeError(
+            f"{ENV_VAR}=prod requires {API_KEY_ENV} to be set. "
+            "Without it the researcher and admin endpoints are public."
+        )
 
 
 def api_key_required() -> bool:

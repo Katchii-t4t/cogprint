@@ -146,6 +146,34 @@ def test_a_rotated_token_stops_working(client):
     ).status_code == 200
 
 
+def test_production_refuses_to_start_without_an_api_key(monkeypatch):
+    """SEC-002. `require_api_key` is a no-op when no key is configured, which
+    is right for local work and wrong for a deploy: one forgotten environment
+    variable exposes the participant list, the CSV export, the analytics funnel
+    and the reminder trigger, behind a green health check.
+
+    An instance that refuses to boot is an obvious problem. One that boots and
+    serves everyone's data is a quiet one that runs for months.
+    """
+    import auth as auth_module
+
+    monkeypatch.setenv("COGPRINT_ENV", "prod")
+    monkeypatch.delenv("COGPRINT_API_KEY", raising=False)
+    with pytest.raises(RuntimeError, match="COGPRINT_API_KEY"):
+        auth_module.assert_production_config()
+
+    monkeypatch.setenv("COGPRINT_API_KEY", "a-long-random-value")
+    auth_module.assert_production_config()  # must not raise
+
+
+def test_development_keeps_the_zero_config_promise(monkeypatch):
+    import auth as auth_module
+
+    monkeypatch.delenv("COGPRINT_ENV", raising=False)
+    monkeypatch.delenv("COGPRINT_API_KEY", raising=False)
+    auth_module.assert_production_config()  # must not raise
+
+
 def test_the_token_never_appears_in_a_url(client, owner_and_stranger):
     """A credential in a query string lands in access logs, browser history and
     Referer headers. It belongs in a header, and only in a header."""
