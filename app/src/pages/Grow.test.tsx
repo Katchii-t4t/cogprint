@@ -181,6 +181,24 @@ describe("a treatment participant's screen", () => {
     expect(screen.getByText(/specialist/i)).toBeInTheDocument();
   });
 
+  it("never prints an interval that excludes its own point estimate", async () => {
+    // The headline used to come from the Ebbinghaus OLS fit while the interval
+    // came from the Bayesian posterior — two estimators, one claim. In the
+    // browser that produced "26% at 7 days · likely 0–10%", which reads as a
+    // bug and costs exactly the calibration trust the product is built on.
+    await renderGrow("treatment");
+
+    const cards = screen.getAllByText(/likely \d+–\d+%/);
+    expect(cards.length).toBeGreaterThan(0);
+    for (const band of cards) {
+      const [, lo, hi] = band.textContent!.match(/likely (\d+)–(\d+)%/)!;
+      const card = band.closest("div")!;
+      const [, point] = card.textContent!.match(/(\d+)%\s*at 7 days/)!;
+      expect(Number(point)).toBeGreaterThanOrEqual(Number(lo));
+      expect(Number(point)).toBeLessThanOrEqual(Number(hi));
+    }
+  });
+
   it("shows the confidence band, so the uncertainty is visible", async () => {
     // Guardrail #3 in the other direction: the treatment arm must see the
     // range, not a bare point estimate posing as a measurement.

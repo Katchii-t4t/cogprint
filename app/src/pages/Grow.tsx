@@ -49,7 +49,7 @@ function retentionBand(
   fpResp: FingerprintResponse | null,
   technique: string,
   isTreatment: boolean,
-): { lo: number; hi: number; early: boolean } | null {
+): { point: number; lo: number; hi: number; early: boolean } | null {
   if (!isTreatment) return null;
   const s = fpResp?.fingerprint.technique_stability?.find(
     (t) => t.technique === technique,
@@ -58,7 +58,21 @@ function retentionBand(
   const lo = Math.round(Math.exp(-7 / s.ci_lower_days) * 100);
   const hi = Math.round(Math.exp(-7 / s.ci_upper_days) * 100);
   if (hi - lo < 2) return null; // a ±1% band is noise, not information
-  return { lo, hi, early: !s.population_informed };
+  return {
+    // The point estimate comes from the SAME posterior as the interval.
+    //
+    // It used to come from `memory_profiles`, the Ebbinghaus OLS fit, while
+    // the interval came from `technique_stability`, the Bayesian posterior.
+    // Two different estimators presented as one claim — and they disagreed
+    // enough in practice to print "26% at 7 days · likely 0–10%", an interval
+    // that excludes its own headline. Measured coverage of the posterior is
+    // 92–96% against a nominal 95%, so the interval was never the problem;
+    // pairing it with a different estimator's number was.
+    point: Math.exp(-7 / s.posterior_median_days),
+    lo,
+    hi,
+    early: !s.population_informed,
+  };
 }
 
 /** §4.2 — shown only when the last background rebuild failed. One tap recovers. */
@@ -380,7 +394,7 @@ export default function Grow() {
                           {label(r.technique)}
                         </p>
                         <p className="text-white font-bold text-xl">
-                          {Math.round(r.predicted7d * 100)}%
+                          {Math.round((band?.point ?? r.predicted7d) * 100)}%
                         </p>
                         <p className="text-slate-500 text-[10px]">at 7 days · {r.label}</p>
                         {band && (
