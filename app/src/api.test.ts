@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "./api";
+import { setState } from "./store";
 
 /**
  * Guardrail #5 — never enumerate, and never put a secret in a URL.
@@ -73,6 +74,54 @@ describe("secrets never travel in the URL", () => {
     // call whose only argument is an id and whose result is an identity.
     expect(api).not.toHaveProperty("restoreAccount");
     expect(api).not.toHaveProperty("getUser");
+  });
+});
+
+describe("the credential", () => {
+  const SAVED = "b8f2c1a09d4e7f36b8f2c1a09d4e7f36b8f2c1a09d4e7f36";
+
+  function headersOf(n = 0): Record<string, string> {
+    return (fetchMock.mock.calls[n][1] as RequestInit).headers as Record<string, string>;
+  }
+
+  it("attaches the stored recovery key to every request", async () => {
+    // Every route addressed by user_id requires it. Without this the app
+    // silently 401s on the library, the plan and the fingerprint.
+    setState({ userId: 3, recoveryKey: SAVED });
+    await api.getFingerprint(3);
+    expect(headersOf().Authorization).toBe(`Bearer ${SAVED}`);
+  });
+
+  it("sends no Authorization header when there is no key yet", async () => {
+    // Sign-up itself is unauthenticated; sending `Bearer null` would be worse
+    // than sending nothing, because it looks like a failed credential.
+    await api.createUser("treatment");
+    expect(headersOf()).not.toHaveProperty("Authorization");
+  });
+
+  it("picks up a rotated key without a reload", async () => {
+    // Rotation replaces the token mid-session. A value captured once at module
+    // load would log the user out until they refreshed.
+    setState({ userId: 3, recoveryKey: SAVED });
+    await api.getFingerprint(3);
+    setState({ recoveryKey: "rotated-token" });
+    await api.getFingerprint(3);
+    expect(headersOf(1).Authorization).toBe("Bearer rotated-token");
+  });
+
+  it("keeps the credential out of the URL", async () => {
+    setState({ userId: 3, recoveryKey: SAVED });
+    await api.getLibrary(3);
+    expect(calledUrl()).not.toContain(SAVED);
+  });
+
+  it("does not let a caller-supplied init drop the headers", async () => {
+    // `{headers, ...init}` let any init carrying its own headers replace the
+    // whole object, credential included. Order matters here.
+    setState({ userId: 3, recoveryKey: SAVED });
+    await api.getQuestions(4);
+    expect(headersOf().Authorization).toBe(`Bearer ${SAVED}`);
+    expect(headersOf()["Content-Type"]).toBe("application/json");
   });
 });
 

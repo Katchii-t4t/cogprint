@@ -1,6 +1,6 @@
 """Tests for the optional API-key auth on sensitive endpoints."""
 
-from tests.conftest import log_session, make_user
+from tests.conftest import auth, log_session, make_user
 
 
 def test_open_mode_allows_sensitive_endpoints(client):
@@ -31,5 +31,5 @@ def test_keyed_mode_leaves_participant_endpoints_open(client, monkeypatch):
     monkeypatch.setenv("COGPRINT_API_KEY", "s3cret-test-key")
     uid = make_user(client, group="treatment")
     log_session(client, uid)
-    assert client.get(f"/users/{uid}/fingerprint").status_code == 200
-    assert client.get(f"/users/{uid}/pending-checks").status_code == 200
+    assert client.get(f"/users/{uid}/fingerprint", headers=auth(uid)).status_code == 200
+    assert client.get(f"/users/{uid}/pending-checks", headers=auth(uid)).status_code == 200

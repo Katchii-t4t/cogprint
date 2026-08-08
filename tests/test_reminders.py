@@ -11,7 +11,7 @@ import pytest
 import auth
 import database
 import main
-from tests.conftest import backdate_session, log_session, make_user
+from tests.conftest import backdate_session, log_session, make_user, register_token
 
 
 @pytest.fixture(autouse=True)
@@ -33,6 +33,7 @@ def sent(monkeypatch):
 def _verified_user_with_due_review(client, sent, email="learner@example.com"):
     """A user who has verified an address and has a retention check overdue."""
     created = client.post("/users", json={"group": "treatment"}).json()
+    register_token(created["id"], created["recovery_token"])
     client.post("/auth/email/attach", json={
         "recovery_token": created["recovery_token"], "email": email,
     })
@@ -58,6 +59,7 @@ def test_reminder_is_sent_for_due_reviews(client, sent):
 
 def test_unverified_address_is_never_emailed(client, sent):
     created = client.post("/users", json={"group": "treatment"}).json()
+    register_token(created["id"], created["recovery_token"])
     client.post("/auth/email/attach", json={
         "recovery_token": created["recovery_token"], "email": "unverified@example.com",
     })
@@ -72,6 +74,7 @@ def test_unverified_address_is_never_emailed(client, sent):
 
 def test_no_email_when_nothing_is_due(client, sent):
     created = client.post("/users", json={"group": "treatment"}).json()
+    register_token(created["id"], created["recovery_token"])
     client.post("/auth/email/attach", json={
         "recovery_token": created["recovery_token"], "email": "idle@example.com",
     })

@@ -13,7 +13,7 @@ import pytest
 
 import analytics
 import database
-from tests.conftest import make_user
+from tests.conftest import auth, make_user
 
 
 def _seed_event(user_id, event_name, when):
@@ -90,7 +90,7 @@ def test_core_actions_are_instrumented(client):
     client.post("/sessions", json={
         "user_id": uid, "technique": "active_recall", "duration_minutes": 20,
         "time_of_day": "morning", "quiz_score": 0.8,
-    })
+    }, headers=auth(uid))
     assert _count("session_logged") >= 1
 
 

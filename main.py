@@ -7,15 +7,17 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import List, Optional
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from auth import (
+    bearer_token,
     rate_limit_email,
     rate_limit_ocr,
+    rate_limit_rebuild,
     rate_limit_recovery,
     require_api_key,
 )
@@ -243,6 +245,64 @@ def _user_for_token(db: Session, token: str) -> User:
     if not user:
         raise HTTPException(status_code=404, detail="No account matches that recovery key.")
     return user
+
+
+# ---------------------------------------------------------------------------
+# Per-user authorization
+#
+# Ids are sequential, so ANY route addressed by user_id is an enumeration hole
+# unless the caller proves they own that id. Replacing the id-based account
+# restore closed one such route; these dependencies close the rest.
+#
+# The proof is the same 192-bit recovery token, presented as
+# `Authorization: Bearer <token>` — a header rather than a body field so it
+# works for GETs, and never a query parameter, where it would land in access
+# logs, browser history and Referer headers.
+#
+# Failure modes are deliberately uniform: 401 with one message whether the
+# header was absent, malformed or simply wrong, and 404 (not 403) when a valid
+# token addresses somebody else's id — so probing cannot distinguish "that user
+# does not exist" from "that user exists and is not you".
+# ---------------------------------------------------------------------------
+
+_UNAUTHENTICATED = HTTPException(
+    status_code=401,
+    detail="Missing or invalid credentials.",
+    headers={"WWW-Authenticate": "Bearer"},
+)
+
+
+def current_user(
+    authorization: Optional[str] = Header(default=None),
+    db: Session = Depends(get_db),
+) -> User:
+    """Resolve the caller from their bearer token, or 401."""
+    token = bearer_token(authorization)
+    if not token:
+        raise _UNAUTHENTICATED
+    user = (
+        db.query(User)
+        .filter_by(recovery_token_hash=hash_recovery_token(token))
+        .first()
+    )
+    if not user:
+        raise _UNAUTHENTICATED
+    return user
+
+
+def require_owner(
+    user_id: int,
+    caller: User = Depends(current_user),
+) -> User:
+    """Resolve the caller and require that they own the `user_id` in the path.
+
+    Declaring `user_id` here works because FastAPI resolves path parameters for
+    dependencies too, so every route keeps its existing signature and simply
+    gains `Depends(require_owner)`.
+    """
+    if caller.id != user_id:
+        raise HTTPException(status_code=404, detail="User not found")
+    return caller
 
 
 @app.post(
@@ -576,7 +636,11 @@ def get_user(user_id: int, db: Session = Depends(get_db)):
     return user
 
 
-@app.patch("/users/{user_id}/post-test", response_model=UserResponse)
+@app.patch(
+    "/users/{user_id}/post-test",
+    response_model=UserResponse,
+    dependencies=[Depends(require_owner)],
+)
 def update_post_test(user_id: int, body: PostTestUpdate, db: Session = Depends(get_db)):
     user = db.query(User).filter_by(id=user_id).first()
     if not user:
@@ -595,11 +659,16 @@ def update_post_test(user_id: int, body: PostTestUpdate, db: Session = Depends(g
 def log_session(
     body: SessionCreate,
     background_tasks: BackgroundTasks,
+    caller: User = Depends(current_user),
     db: Session = Depends(get_db),
 ):
-    user = db.query(User).filter_by(id=body.user_id).first()
-    if not user:
+    # The id is in the body rather than the path, so require_owner cannot see
+    # it — the check happens here instead. Left open, this route let anyone
+    # inject sessions into a stranger's fingerprint, which corrupts both the
+    # personalisation and the study's outcome data.
+    if body.user_id != caller.id:
         raise HTTPException(status_code=404, detail="User not found")
+    user = caller
 
     session = StudySession(
         user_id=body.user_id,
@@ -637,8 +706,15 @@ def log_session(
 def log_retention_check(
     body: RetentionCheckCreate,
     background_tasks: BackgroundTasks,
+    caller: User = Depends(current_user),
     db: Session = Depends(get_db),
 ):
+    # Same reasoning as log_session: the id is in the body. The existing check
+    # that the session belongs to body.user_id is necessary but not sufficient
+    # — without this line, body.user_id itself was unauthenticated.
+    if body.user_id != caller.id:
+        raise HTTPException(status_code=404, detail="Session not found for this user")
+
     session = db.query(StudySession).filter_by(id=body.session_id).first()
     if not session or session.user_id != body.user_id:
         raise HTTPException(status_code=404, detail="Session not found for this user")
@@ -679,7 +755,11 @@ def log_retention_check(
 # Cognitive fingerprint
 # ---------------------------------------------------------------------------
 
-@app.get("/users/{user_id}/fingerprint", response_model=FingerprintResponse)
+@app.get(
+    "/users/{user_id}/fingerprint",
+    response_model=FingerprintResponse,
+    dependencies=[Depends(require_owner)],
+)
 def get_fingerprint(user_id: int, db: Session = Depends(get_db)):
     user = db.query(User).filter_by(id=user_id).first()
     if not user:
@@ -713,7 +793,13 @@ def get_fingerprint(user_id: int, db: Session = Depends(get_db)):
     )
 
 
-@app.post("/users/{user_id}/fingerprint/rebuild", response_model=FingerprintResponse)
+@app.post(
+    "/users/{user_id}/fingerprint/rebuild",
+    response_model=FingerprintResponse,
+    # Also the only unauthenticated route that ran MCMC synchronously, so this
+    # closes a compute-exhaustion path as well as an enumeration one.
+    dependencies=[Depends(require_owner), Depends(rate_limit_rebuild)],
+)
 def force_rebuild_fingerprint(user_id: int, db: Session = Depends(get_db)):
     """Manually trigger a fingerprint rebuild ("rebuild now", §4.2) — useful after
     bulk import or to recover from a failed background rebuild. Unlike the
@@ -985,7 +1071,11 @@ def flag_question(material_id: int, body: FlagQuestionRequest, db: Session = Dep
 # Study plan generation (Agent 3)
 # ---------------------------------------------------------------------------
 
-@app.post("/users/{user_id}/study-plan", response_model=StudyPlanResponse)
+@app.post(
+    "/users/{user_id}/study-plan",
+    response_model=StudyPlanResponse,
+    dependencies=[Depends(require_owner)],
+)
 def generate_study_plan(
     user_id: int,
     material_id: int,
@@ -1135,7 +1225,11 @@ def export_study_data(
 # Session listing
 # ---------------------------------------------------------------------------
 
-@app.get("/users/{user_id}/sessions", response_model=List[SessionResponse])
+@app.get(
+    "/users/{user_id}/sessions",
+    response_model=List[SessionResponse],
+    dependencies=[Depends(require_owner)],
+)
 def list_sessions(user_id: int, db: Session = Depends(get_db)):
     user = db.query(User).filter_by(id=user_id).first()
     if not user:
@@ -1153,7 +1247,11 @@ def list_sessions(user_id: int, db: Session = Depends(get_db)):
 # Review suggestions — predicted forgetting per material (deterministic)
 # ---------------------------------------------------------------------------
 
-@app.get("/users/{user_id}/review-suggestions", response_model=List[ReviewSuggestion])
+@app.get(
+    "/users/{user_id}/review-suggestions",
+    response_model=List[ReviewSuggestion],
+    dependencies=[Depends(require_owner)],
+)
 def get_review_suggestions(user_id: int, db: Session = Depends(get_db)):
     """Per-material predicted retention via Ebbinghaus R(t)=exp(-t/S).
 
@@ -1223,7 +1321,11 @@ def get_review_suggestions(user_id: int, db: Session = Depends(get_db)):
 # Material library (§3.3) — the returning-user home
 # ---------------------------------------------------------------------------
 
-@app.get("/users/{user_id}/materials", response_model=List[MaterialLibraryItem])
+@app.get(
+    "/users/{user_id}/materials",
+    response_model=List[MaterialLibraryItem],
+    dependencies=[Depends(require_owner)],
+)
 def get_material_library(user_id: int, db: Session = Depends(get_db)):
     """Every material this user has studied, newest-studied first, each with its
     concept count, how many times it's been studied, its Ebbinghaus forgetting
@@ -1323,7 +1425,7 @@ class PendingCheckItem(BaseModel):
     due_date: datetime
 
 
-@app.get("/users/{user_id}/pending-checks")
+@app.get("/users/{user_id}/pending-checks", dependencies=[Depends(require_owner)])
 def get_pending_checks(user_id: int, db: Session = Depends(get_db)) -> List[PendingCheckItem]:
     user = db.query(User).filter_by(id=user_id).first()
     if not user:
@@ -1424,7 +1526,11 @@ def _buddy_forecast(db: Session, user: User) -> BuddyForecast:
     )
 
 
-@app.post("/users/{user_id}/share-code", response_model=ShareCodeResponse)
+@app.post(
+    "/users/{user_id}/share-code",
+    response_model=ShareCodeResponse,
+    dependencies=[Depends(require_owner)],
+)
 def get_or_create_share_code(user_id: int, db: Session = Depends(get_db)):
     """Return this user's buddy code, generating one lazily if they predate it."""
     user = db.query(User).filter_by(id=user_id).first()

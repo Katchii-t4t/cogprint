@@ -6,7 +6,7 @@ date sizes the horizon instead of the hardcoded 14 days.
 
 from datetime import date, timedelta
 
-from tests.conftest import make_user, backdate_session
+from tests.conftest import auth, make_user, backdate_session
 
 TEXT = (
     "Photosynthesis converts light energy into chemical energy. "
@@ -26,13 +26,13 @@ def _log(client, uid, mid):
     r = client.post("/sessions", json={
         "user_id": uid, "material_id": mid, "technique": "active_recall",
         "duration_minutes": 25, "time_of_day": "morning", "quiz_score": 0.7,
-    })
+    }, headers=auth(uid))
     assert r.status_code == 201, r.text
     return r.json()["id"]
 
 
 def _plan(client, uid, mid, **params):
-    r = client.post(f"/users/{uid}/study-plan", params={"material_id": mid, **params})
+    r = client.post(f"/users/{uid}/study-plan", params={"material_id": mid, **params}, headers=auth(uid))
     assert r.status_code == 200, r.text
     return r.json()
 
@@ -73,7 +73,7 @@ def test_exam_date_sizes_the_horizon(client):
 def test_bad_exam_date_is_422(client):
     uid = make_user(client, group="treatment")
     mid = _analyze(client)
-    r = client.post(f"/users/{uid}/study-plan", params={"material_id": mid, "target_date": "not-a-date"})
+    r = client.post(f"/users/{uid}/study-plan", params={"material_id": mid, "target_date": "not-a-date"}, headers=auth(uid))
     assert r.status_code == 422
 
 

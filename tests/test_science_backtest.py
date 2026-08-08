@@ -14,7 +14,7 @@ correlation and correct placement of the best/worst techniques, not exact number
 import random
 
 from personalization.priors import RESEARCH_PRIORS
-from tests.conftest import add_retention, log_session, make_user
+from tests.conftest import auth, add_retention, log_session, make_user
 
 # Ground-truth ordering (best → worst) straight from the research priors.
 GROUND_TRUTH = sorted(
@@ -54,7 +54,7 @@ def test_brain_recovers_literature_ranking(client):
     uid = make_user(client, group="treatment")
     _seed_literature_learner(client, uid, sessions_per_tech=6, seed=7)
 
-    r = client.get(f"/users/{uid}/fingerprint")
+    r = client.get(f"/users/{uid}/fingerprint", headers=auth(uid))
     assert r.status_code == 200, r.text
     profiles = r.json()["fingerprint"]["memory_profiles"]
     assert profiles, "expected per-technique memory profiles after rich seeding"
@@ -84,7 +84,7 @@ def test_recovered_retention_tracks_ground_truth_magnitude(client):
     uid = make_user(client, group="treatment")
     _seed_literature_learner(client, uid, sessions_per_tech=6, seed=11)
 
-    profiles = client.get(f"/users/{uid}/fingerprint").json()["fingerprint"]["memory_profiles"]
+    profiles = client.get(f"/users/{uid}/fingerprint", headers=auth(uid)).json()["fingerprint"]["memory_profiles"]
     by_tech = {p["technique"]: p["predicted_retention_7d"] for p in profiles}
 
     if "practice_testing" in by_tech and "re_reading" in by_tech:

@@ -10,7 +10,7 @@ import pytest
 
 import auth
 import database
-from tests.conftest import add_retention, log_session, make_user
+from tests.conftest import add_retention, log_session, make_user, register_token
 
 TEXT = (
     "Photosynthesis converts light energy into chemical energy. "
@@ -29,6 +29,7 @@ def _account_with_history(client):
     """A user with a material, a session and a retention check."""
     created = client.post("/users", json={"group": "treatment"}).json()
     uid, token = created["id"], created["recovery_token"]
+    register_token(uid, token)
 
     mat = client.post("/materials/analyze", json={"title": "Photosynthesis", "raw_text": TEXT})
     material_id = mat.json()["material_id"]
@@ -36,7 +37,7 @@ def _account_with_history(client):
     r = client.post("/sessions", json={
         "user_id": uid, "material_id": material_id, "technique": "active_recall",
         "duration_minutes": 25, "time_of_day": "morning", "quiz_score": 0.8,
-    })
+    }, headers={"Authorization": f"Bearer {token}"})
     add_retention(client, r.json()["id"], uid, "24h", 0.75)
     return uid, token, material_id
 

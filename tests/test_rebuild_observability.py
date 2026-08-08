@@ -9,14 +9,14 @@ session-log POST returns.
 """
 
 import main
-from tests.conftest import make_user, log_session
+from tests.conftest import auth, make_user, log_session
 
 
 def test_successful_rebuild_records_ok(client):
     uid = make_user(client)
     log_session(client, uid, technique="active_recall", quiz_score=0.8)
 
-    fp = client.get(f"/users/{uid}/fingerprint").json()
+    fp = client.get(f"/users/{uid}/fingerprint", headers=auth(uid)).json()
     assert fp["rebuild_status"] == "ok"
     assert fp["rebuild_at"] is not None
 
@@ -24,7 +24,7 @@ def test_successful_rebuild_records_ok(client):
 def test_manual_rebuild_reports_ok(client):
     uid = make_user(client)
     log_session(client, uid)
-    r = client.post(f"/users/{uid}/fingerprint/rebuild")
+    r = client.post(f"/users/{uid}/fingerprint/rebuild", headers=auth(uid))
     assert r.status_code == 200, r.text
     assert r.json()["rebuild_status"] == "ok"
 
@@ -42,7 +42,7 @@ def test_failed_background_rebuild_is_recorded_not_swallowed(client, monkeypatch
     # The session log itself must still succeed (background failure is isolated).
     log_session(client, uid, technique="active_recall", quiz_score=0.7)
 
-    fp = client.get(f"/users/{uid}/fingerprint").json()
+    fp = client.get(f"/users/{uid}/fingerprint", headers=auth(uid)).json()
     assert fp["rebuild_status"] == "failed"
     assert fp["rebuild_at"] is not None
 
@@ -54,10 +54,10 @@ def test_manual_rebuild_failure_returns_500_and_records(client, monkeypatch):
         raise RuntimeError("simulated blowup")
 
     monkeypatch.setattr(main, "rebuild_fingerprint", boom)
-    r = client.post(f"/users/{uid}/fingerprint/rebuild")
+    r = client.post(f"/users/{uid}/fingerprint/rebuild", headers=auth(uid))
     assert r.status_code == 500
 
     # Status is still stamped even though the endpoint reported failure.
     monkeypatch.undo()  # let the GET's own logic run normally
-    fp = client.get(f"/users/{uid}/fingerprint").json()
+    fp = client.get(f"/users/{uid}/fingerprint", headers=auth(uid)).json()
     assert fp["rebuild_status"] == "failed"

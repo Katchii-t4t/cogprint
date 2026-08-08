@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 import database
 from personalization.review import predicted_retention
-from tests.conftest import make_user
+from tests.conftest import auth, make_user
 
 MATERIAL_TEXT = (
     "Photosynthesis converts light energy into chemical energy. It occurs in "
@@ -23,7 +23,7 @@ def _session_on(client, uid, mid):
     r = client.post("/sessions", json={
         "user_id": uid, "material_id": mid, "technique": "active_recall",
         "duration_minutes": 30, "time_of_day": "morning", "quiz_score": 0.8,
-    })
+    }, headers=auth(uid))
     assert r.status_code == 201, r.text
     return r.json()["id"]
 
@@ -54,7 +54,7 @@ def test_review_suggestions_flags_fading_material(client):
     _session_on(client, uid, new_mid)
     _backdate(sid_old, days=30)
 
-    r = client.get(f"/users/{uid}/review-suggestions")
+    r = client.get(f"/users/{uid}/review-suggestions", headers=auth(uid))
     assert r.status_code == 200
     items = r.json()
     assert len(items) == 2
@@ -71,7 +71,17 @@ def test_review_suggestions_flags_fading_material(client):
     assert fresh["predicted_retention"] > 0.95
 
 
-def test_review_suggestions_empty_and_404(client):
+def test_review_suggestions_empty_and_not_enumerable(client):
     uid = make_user(client)
-    assert client.get(f"/users/{uid}/review-suggestions").json() == []
-    assert client.get("/users/99999/review-suggestions").status_code == 404
+    assert client.get(f"/users/{uid}/review-suggestions", headers=auth(uid)).json() == []
+
+    # An unknown id and somebody else's id must be indistinguishable, or the
+    # endpoint still confirms which accounts exist.
+    stranger = make_user(client)
+    assert client.get("/users/99999/review-suggestions").status_code == 401
+    assert client.get(
+        f"/users/{uid}/review-suggestions", headers=auth(stranger)
+    ).status_code == 404
+    assert client.get(
+        "/users/99999/review-suggestions", headers=auth(stranger)
+    ).status_code == 404

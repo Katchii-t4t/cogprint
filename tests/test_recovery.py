@@ -102,6 +102,8 @@ def test_user_lookup_by_id_is_not_a_public_endpoint(client, monkeypatch):
     uid = _create(client)["id"]
     monkeypatch.setenv("COGPRINT_API_KEY", "test-key")
 
+    # No API key header at all — this route is guarded by the researcher key,
+    # not by a participant's own token.
     assert client.get(f"/users/{uid}").status_code == 401
     ok = client.get(f"/users/{uid}", headers={"X-API-Key": "test-key"})
     assert ok.status_code == 200

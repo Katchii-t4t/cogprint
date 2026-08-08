@@ -55,6 +55,22 @@ def require_api_key(x_api_key: Optional[str] = Header(default=None)) -> None:
         )
 
 
+def bearer_token(authorization: Optional[str]) -> Optional[str]:
+    """Extract the token from an ``Authorization: Bearer <token>`` header.
+
+    Returns None for a missing or malformed header rather than raising, so the
+    caller decides the status code — the routes want 401 with a uniform message
+    whether the header was absent, misspelled or wrong, since a caller who has
+    no valid token learns nothing from the distinction.
+    """
+    if not authorization:
+        return None
+    scheme, _, value = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not value.strip():
+        return None
+    return value.strip()
+
+
 # ── Rate limiting for credential endpoints ────────────────────────────────────
 #
 # Recovery tokens carry 192 bits of entropy, so online guessing is already
@@ -141,6 +157,16 @@ rate_limit_email = make_rate_limiter(
 rate_limit_ocr = make_rate_limiter(
     "ocr", 20, 3600.0,
     "Too many photo scans in a short time. Try again later, or paste the text.",
+)
+
+
+# A synchronous rebuild runs MCMC over the user's whole history, so it is the
+# most expensive thing an authenticated caller can ask for. Generous enough for
+# a user tapping "Rebuild" after a failure, tight enough that a loop cannot pin
+# a worker.
+rate_limit_rebuild = make_rate_limiter(
+    "rebuild", 10, 600.0,
+    "Too many rebuilds in a short time. Your fingerprint updates automatically.",
 )
 
 

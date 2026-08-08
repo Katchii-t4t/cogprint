@@ -8,7 +8,7 @@ pin exact numbers (the math is allowed to evolve) but to prove the pipeline
 runs to completion on realistic data and the RCT control/treatment split holds.
 """
 
-from tests.conftest import add_retention, log_session, make_user
+from tests.conftest import auth, add_retention, log_session, make_user
 
 TECHNIQUES = ["active_recall", "spaced_repetition", "re_reading"]
 
@@ -40,7 +40,7 @@ def test_full_pipeline_high_confidence(client):
     uid = make_user(client, group="treatment", pre_test_score=0.4)
     _seed_rich_history(client, uid, sessions_per_tech=6)  # 18 sessions
 
-    r = client.get(f"/users/{uid}/fingerprint")
+    r = client.get(f"/users/{uid}/fingerprint", headers=auth(uid))
     assert r.status_code == 200, r.text
     fp = r.json()["fingerprint"]
 
@@ -60,8 +60,8 @@ def test_force_rebuild_is_idempotent(client):
     uid = make_user(client, group="treatment")
     _seed_rich_history(client, uid, sessions_per_tech=2)
 
-    a = client.post(f"/users/{uid}/fingerprint/rebuild").json()["fingerprint"]
-    b = client.post(f"/users/{uid}/fingerprint/rebuild").json()["fingerprint"]
+    a = client.post(f"/users/{uid}/fingerprint/rebuild", headers=auth(uid)).json()["fingerprint"]
+    b = client.post(f"/users/{uid}/fingerprint/rebuild", headers=auth(uid)).json()["fingerprint"]
     # Same input data -> same session_count and confidence on repeated rebuilds.
     assert a["session_count"] == b["session_count"]
     assert a["confidence"] == b["confidence"]
@@ -75,8 +75,8 @@ def test_control_group_is_blinded(client):
     _seed_rich_history(client, treat, sessions_per_tech=6)
     _seed_rich_history(client, ctrl, sessions_per_tech=6)
 
-    t_fp = client.get(f"/users/{treat}/fingerprint").json()["fingerprint"]
-    c_fp = client.get(f"/users/{ctrl}/fingerprint").json()["fingerprint"]
+    t_fp = client.get(f"/users/{treat}/fingerprint", headers=auth(treat)).json()["fingerprint"]
+    c_fp = client.get(f"/users/{ctrl}/fingerprint", headers=auth(ctrl)).json()["fingerprint"]
 
     # Treatment runs the full bandit; control gets a generic profile with no
     # personalised bandit rewards. They must not be identical.
@@ -113,7 +113,7 @@ def test_control_confidence_tracks_effort_so_the_blind_holds(client):
     ctrl = make_user(client, group="control")
     _seed_rich_history(client, ctrl, sessions_per_tech=6)  # 18 sessions
 
-    c_fp = client.get(f"/users/{ctrl}/fingerprint").json()["fingerprint"]
+    c_fp = client.get(f"/users/{ctrl}/fingerprint", headers=auth(ctrl)).json()["fingerprint"]
     assert c_fp["session_count"] == 18
     assert c_fp["confidence"] == "high"
 
@@ -126,7 +126,7 @@ def test_control_confidence_still_starts_low(client):
     """A control user with no history is low-confidence for the honest reason,
     not because the arm is hardcoded."""
     ctrl = make_user(client, group="control")
-    c_fp = client.get(f"/users/{ctrl}/fingerprint").json()["fingerprint"]
+    c_fp = client.get(f"/users/{ctrl}/fingerprint", headers=auth(ctrl)).json()["fingerprint"]
     assert c_fp["session_count"] == 0
     assert c_fp["confidence"] == "low"
 
@@ -144,7 +144,7 @@ def test_cold_start_recommendations_follow_the_research_ranking(client):
     the planner, never this field.
     """
     uid = make_user(client, group="treatment")
-    fp = client.post(f"/users/{uid}/fingerprint/rebuild").json()["fingerprint"]
+    fp = client.post(f"/users/{uid}/fingerprint/rebuild", headers=auth(uid)).json()["fingerprint"]
 
     top3 = fp["recommended_techniques"][:3]
     assert top3 == ["practice_testing", "spaced_repetition", "active_recall"]
@@ -169,7 +169,7 @@ def test_cold_start_plan_is_not_fourteen_identical_days(client):
         ),
     }).json()
     plan = client.post(
-        f"/users/{uid}/study-plan?material_id={material['material_id']}&total_days=14"
+        f"/users/{uid}/study-plan?material_id={material['material_id']}&total_days=14", headers=auth(uid)
     ).json()
 
     techniques = {d["technique"] for d in plan["days"] if d["session_duration_minutes"] > 0}
@@ -186,6 +186,6 @@ def test_cold_start_plan_is_not_fourteen_identical_days(client):
 
 def test_empty_user_returns_generic_fingerprint(client):
     uid = make_user(client, group="treatment")
-    fp = client.get(f"/users/{uid}/fingerprint").json()["fingerprint"]
+    fp = client.get(f"/users/{uid}/fingerprint", headers=auth(uid)).json()["fingerprint"]
     assert fp["session_count"] == 0
     assert fp["confidence"] == "low"

@@ -2,6 +2,7 @@
 
 from tests.conftest import (
     add_retention,
+    auth,
     backdate_session,
     log_session,
     make_user,
@@ -16,7 +17,7 @@ def test_health(client):
 
 def test_create_and_get_user(client):
     uid = make_user(client, group="treatment", pre_test_score=0.4)
-    r = client.get(f"/users/{uid}")
+    r = client.get(f"/users/{uid}", headers=auth(uid))
     assert r.status_code == 200
     body = r.json()
     assert body["group"] == "treatment"
@@ -29,7 +30,7 @@ def test_get_missing_user_404(client):
 
 def test_post_test_update(client):
     uid = make_user(client)
-    r = client.patch(f"/users/{uid}/post-test", json={"post_test_score": 0.9})
+    r = client.patch(f"/users/{uid}/post-test", json={"post_test_score": 0.9}, headers=auth(uid))
     assert r.status_code == 200
     assert r.json()["post_test_score"] == 0.9
 
@@ -39,14 +40,14 @@ def test_session_validation_rejects_bad_quiz_score(client):
     r = client.post("/sessions", json={
         "user_id": uid, "technique": "active_recall", "duration_minutes": 30,
         "time_of_day": "morning", "quiz_score": 1.5,  # out of [0,1]
-    })
+    }, headers=auth(uid))
     assert r.status_code == 422
 
 
 def test_log_session_and_list(client):
     uid = make_user(client)
     sid = log_session(client, uid, quiz_score=0.8)
-    r = client.get(f"/users/{uid}/sessions")
+    r = client.get(f"/users/{uid}/sessions", headers=auth(uid))
     assert r.status_code == 200
     sessions = r.json()
     assert len(sessions) == 1
@@ -58,7 +59,7 @@ def test_fingerprint_built_after_sessions(client):
     uid = make_user(client, group="treatment")
     for i in range(6):
         log_session(client, uid, technique="active_recall", quiz_score=0.7 + i * 0.02)
-    r = client.get(f"/users/{uid}/fingerprint")
+    r = client.get(f"/users/{uid}/fingerprint", headers=auth(uid))
     assert r.status_code == 200
     fp = r.json()["fingerprint"]
     assert fp["session_count"] == 6
@@ -70,11 +71,11 @@ def test_retention_check_flow(client):
     sid = log_session(client, uid, quiz_score=0.8)
 
     # Nothing due immediately.
-    assert client.get(f"/users/{uid}/pending-checks").json() == []
+    assert client.get(f"/users/{uid}/pending-checks", headers=auth(uid)).json() == []
 
     # Backdate 8 days so both 24h and 7d checks are due.
     backdate_session(sid, days=8)
-    pending = client.get(f"/users/{uid}/pending-checks").json()
+    pending = client.get(f"/users/{uid}/pending-checks", headers=auth(uid)).json()
     due_types = sorted(p["check_type"] for p in pending)
     assert due_types == ["24h", "7d"]
 
@@ -83,7 +84,7 @@ def test_retention_check_flow(client):
     # Duplicate is rejected.
     assert add_retention(client, sid, uid, "24h", 0.6).status_code == 409
     # 7d still pending.
-    pending = client.get(f"/users/{uid}/pending-checks").json()
+    pending = client.get(f"/users/{uid}/pending-checks", headers=auth(uid)).json()
     assert [p["check_type"] for p in pending] == ["7d"]
 
 
@@ -126,7 +127,8 @@ def test_material_analyze_and_study_plan(client):
     assert r.json()["knowledge_map"]["concepts"]
 
     r = client.post(f"/users/{uid}/study-plan",
-                    params={"material_id": material_id, "total_days": 7})
+                    params={"material_id": material_id, "total_days": 7},
+                    headers=auth(uid))
     assert r.status_code == 200, r.text
     plan = r.json()
     assert plan["total_days"] == 7

@@ -3,7 +3,7 @@ Material library (§3.3): GET /users/{id}/materials — the returning-user home.
 Derived from the user's own sessions, review-aware, cross-device.
 """
 
-from tests.conftest import make_user, backdate_session
+from tests.conftest import auth, make_user, backdate_session
 
 TEXT = (
     "Photosynthesis converts light energy into chemical energy. "
@@ -22,21 +22,37 @@ def _log(client, user_id, material_id, technique="active_recall", quiz_score=0.8
     r = client.post("/sessions", json={
         "user_id": user_id, "material_id": material_id, "technique": technique,
         "duration_minutes": 25, "time_of_day": "morning", "quiz_score": quiz_score,
-    })
+    }, headers=auth(user_id))
     assert r.status_code == 201, r.text
     return r.json()["id"]
 
 
 def test_empty_library_for_new_user(client):
     uid = make_user(client)
-    r = client.get(f"/users/{uid}/materials")
+    r = client.get(f"/users/{uid}/materials", headers=auth(uid))
     assert r.status_code == 200
     assert r.json() == []
 
 
-def test_unknown_user_404(client):
-    r = client.get("/users/999999/materials")
-    assert r.status_code == 404
+def test_another_users_library_is_not_readable(client):
+    """Anonymously, and with a valid token belonging to somebody else.
+
+    401 rather than 404 for the anonymous case, and 404 rather than 403 for the
+    authenticated one: a caller must not be able to tell "no such user" from
+    "that user exists and is not you", or the endpoint is still an enumeration
+    oracle even while refusing to serve the data.
+    """
+    owner = make_user(client)
+    stranger = make_user(client)
+
+    assert client.get(f"/users/{owner}/materials").status_code == 401
+    assert client.get("/users/999999/materials").status_code == 401
+    assert client.get(
+        f"/users/{owner}/materials", headers=auth(stranger)
+    ).status_code == 404
+    assert client.get(
+        "/users/999999/materials", headers=auth(stranger)
+    ).status_code == 404
 
 
 def test_studied_material_appears_with_metadata(client):
@@ -44,7 +60,7 @@ def test_studied_material_appears_with_metadata(client):
     mid = _analyze(client, "Photosynthesis")
     _log(client, uid, mid)
 
-    r = client.get(f"/users/{uid}/materials")
+    r = client.get(f"/users/{uid}/materials", headers=auth(uid))
     assert r.status_code == 200
     items = r.json()
     assert len(items) == 1
@@ -64,7 +80,7 @@ def test_multiple_sessions_aggregate_into_one_entry(client):
     _log(client, uid, mid)
     _log(client, uid, mid)
 
-    items = client.get(f"/users/{uid}/materials").json()
+    items = client.get(f"/users/{uid}/materials", headers=auth(uid)).json()
     assert len(items) == 1
     assert items[0]["session_count"] == 3
 
@@ -76,7 +92,7 @@ def test_reviews_due_counts_overdue_checks(client):
     # Push the session 8 days into the past → both 24h and 7d checks come due.
     backdate_session(sid, days=8)
 
-    items = client.get(f"/users/{uid}/materials").json()
+    items = client.get(f"/users/{uid}/materials", headers=auth(uid)).json()
     assert items[0]["reviews_due"] >= 1
     assert items[0]["fading"] in (True, False)  # computed, not crashing
 
@@ -90,5 +106,5 @@ def test_sorted_by_last_studied_desc(client):
     # Make m1's latest session older than m2's.
     backdate_session(s1, days=3)
 
-    items = client.get(f"/users/{uid}/materials").json()
+    items = client.get(f"/users/{uid}/materials", headers=auth(uid)).json()
     assert [it["title"] for it in items] == ["Second", "First"]

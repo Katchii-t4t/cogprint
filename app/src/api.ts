@@ -18,12 +18,35 @@ import type {
   MaterialLibraryItem,
 } from "./types";
 
+import { getState } from "./store";
+
 const BASE = import.meta.env.VITE_API_BASE ?? "/api";
+
+/**
+ * The recovery token doubles as the API credential.
+ *
+ * Every route addressed by `user_id` now requires it, because ids are
+ * sequential and those routes previously served anybody's data to anybody.
+ * It travels as a header, never a query parameter — a credential in a URL
+ * ends up in access logs, browser history and Referer headers.
+ *
+ * Read per request rather than captured once: sign-up, recovery and rotation
+ * all replace it mid-session, and a stale closure would silently log the user
+ * out until they reloaded.
+ */
+function authHeaders(): Record<string, string> {
+  const key = getState().recoveryKey;
+  return key ? { Authorization: `Bearer ${key}` } : {};
+}
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json", ...init?.headers },
     ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders(),
+      ...init?.headers,
+    },
   });
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);

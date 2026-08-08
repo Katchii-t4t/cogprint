@@ -41,13 +41,47 @@ def client():
         yield c
 
 
+# user_id -> plaintext recovery token, so helpers and tests can authenticate as
+# a user they created without every call site threading the token through.
+#
+# Deliberately NOT an automatic header injection on the client: that would make
+# every test pass whether authorization worked or not, which is exactly the
+# property that let eleven endpoints ship unauthenticated. Tests must ask for
+# credentials explicitly, so a route that stops checking them fails a test.
+_TOKENS: dict[int, str] = {}
+
+
+def auth(user_id):
+    """Headers that authenticate as `user_id`. Empty for an unknown id, so a
+    test can deliberately call as an anonymous stranger."""
+    token = _TOKENS.get(user_id)
+    return {"Authorization": f"Bearer {token}"} if token else {}
+
+
+def token_for(user_id):
+    return _TOKENS[user_id]
+
+
+def register_token(user_id, token):
+    """Record a token for a user this module did not create.
+
+    Some suites call POST /users directly because they need the plaintext token
+    for the endpoint under test (export, delete, rotation). They still want the
+    shared helpers to authenticate for them.
+    """
+    _TOKENS[user_id] = token
+    return user_id
+
+
 def make_user(client, group="treatment", pre_test_score=None):
     body = {"group": group}
     if pre_test_score is not None:
         body["pre_test_score"] = pre_test_score
     r = client.post("/users", json=body)
     assert r.status_code == 201, r.text
-    return r.json()["id"]
+    payload = r.json()
+    _TOKENS[payload["id"]] = payload["recovery_token"]
+    return payload["id"]
 
 
 def log_session(client, user_id, technique="active_recall", quiz_score=0.7,
@@ -61,7 +95,7 @@ def log_session(client, user_id, technique="active_recall", quiz_score=0.7,
         "sleep_hours": sleep_hours,
         "stress_level": stress_level,
     }
-    r = client.post("/sessions", json=body)
+    r = client.post("/sessions", json=body, headers=auth(user_id))
     assert r.status_code == 201, r.text
     return r.json()["id"]
 
@@ -70,7 +104,7 @@ def add_retention(client, session_id, user_id, check_type, score):
     r = client.post("/retention-checks", json={
         "session_id": session_id, "user_id": user_id,
         "check_type": check_type, "score": score,
-    })
+    }, headers=auth(user_id))
     return r
 
 
