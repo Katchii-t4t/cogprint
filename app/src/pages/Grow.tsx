@@ -115,7 +115,10 @@ export default function Grow() {
   const [pendingList, setPendingList] = useState<PendingCheckItem[]>([]);
   const [forecast, setForecast] = useState<MemoryForecast | null>(null);
   const [arch, setArch] = useState<Archetype | null>(null);
-  const [streak, setStreak] = useState<StreakInfo | null>(null);
+  // Read once, lazily, at first render. The streak lives entirely in
+  // localStorage and cannot change while this screen is open, so setting it
+  // from an effect only bought an extra render pass.
+  const [streak] = useState<StreakInfo | null>(() => getStreak());
   const [loading, setLoading] = useState(true);
   const [sharing, setSharing] = useState(false);
   const [name, setName] = useState<string | null>(() => getState().name);
@@ -148,9 +151,6 @@ export default function Grow() {
     const { group } = getState();
 
     track("fingerprint_viewed");
-
-    // Streak is behavioural (local, not fingerprint-derived) — safe for both groups.
-    setStreak(getStreak());
 
     Promise.all([
       api.getFingerprint(userId),
@@ -801,6 +801,11 @@ function BossSection({
   weakestTechnique: string | null;
   onFight: () => void;
 }) {
+  // Captured once at mount rather than read during render. Reading the clock
+  // while rendering makes the output depend on when React happens to re-render,
+  // so two renders of the same data can disagree — and a boss's health bar
+  // would visibly jitter for no reason the user can see.
+  const [now] = useState(() => Date.now());
   return (
     <Section title="Memory bosses">
       <div className="space-y-3">
@@ -817,7 +822,7 @@ function BossSection({
         {checks.map((c, i) => {
           const overdueDays = Math.max(
             0,
-            Math.round((Date.now() - new Date(c.due_date).getTime()) / 86_400_000)
+            Math.round((now - new Date(c.due_date).getTime()) / 86_400_000)
           );
           const hp = Math.min(100, 40 + overdueDays * 20);
           return (
@@ -870,14 +875,19 @@ function BuddyCard() {
     api.getShareCode(userId).then((r) => setMyCode(r.share_code)).catch(() => {});
   }, []);
 
-  // Whenever we're following a buddy, load their forecast.
+  // Whenever we're following a buddy, load their forecast. No setState in the
+  // effect body: unfollowing is handled by deriving below rather than by
+  // resetting state, which also removes a render where the old buddy's data
+  // was still on screen after the code had been cleared.
   useEffect(() => {
-    if (!buddyCode) { setBuddy(null); return; }
+    if (!buddyCode) return;
     api
       .getBuddyForecast(buddyCode)
       .then(setBuddy)
       .catch(() => setErr("Couldn't find a buddy with that code."));
   }, [buddyCode]);
+
+  const followedBuddy = buddyCode ? buddy : null;
 
   function follow() {
     const code = input.trim().toUpperCase();
@@ -918,7 +928,7 @@ function BuddyCard() {
         </div>
 
         {/* Buddy forecast, or the follow form */}
-        {buddy ? (
+        {followedBuddy ? (
           <div className="border-t border-ink-500/40 pt-3">
             <div className="flex items-center justify-between mb-2">
               <p className="text-slate-200 text-sm font-medium">
@@ -929,13 +939,13 @@ function BuddyCard() {
               </button>
             </div>
             <p className="text-slate-400 text-xs leading-relaxed">
-              {buddy.fading > 0
-                ? `${buddy.fading} concept${buddy.fading > 1 ? "s" : ""} fading`
+              {followedBuddy.fading > 0
+                ? `${followedBuddy.fading} concept${followedBuddy.fading > 1 ? "s" : ""} fading`
                 : "memory holding strong"}
-              {buddy.reviews_due > 0 && ` · ${buddy.reviews_due} review${buddy.reviews_due > 1 ? "s" : ""} due`}
-              {` · ${buddy.session_count} session${buddy.session_count !== 1 ? "s" : ""}`}
+              {followedBuddy.reviews_due > 0 && ` · ${followedBuddy.reviews_due} review${followedBuddy.reviews_due > 1 ? "s" : ""} due`}
+              {` · ${followedBuddy.session_count} session${followedBuddy.session_count !== 1 ? "s" : ""}`}
             </p>
-            {buddy.fading > 0 && (
+            {followedBuddy.fading > 0 && (
               <p className="text-amber-300/80 text-xs mt-1">
                 Nudge them to review before it slips away 👀
               </p>

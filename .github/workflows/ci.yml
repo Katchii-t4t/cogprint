@@ -49,6 +49,15 @@ jobs:
           cache-dependency-path: app/package-lock.json
       - run: npm ci
       - run: npm test
+      - name: Lint
+        # Added once the four pre-existing errors were fixed. A script that
+        # always fails trains everyone to skip it, so it only belongs in CI
+        # from the moment it passes.
+        run: npm run lint
+      - name: Dependency advisories
+        # Runtime advisories are the ones that reach a user; build-time noise
+        # would make this gate a nuisance and it would get disabled.
+        run: npm audit --audit-level=high
       - name: Type check
         # `tsc --noEmit` was a no-op here: tsconfig.json is a solution file
         # (`files: []` plus references), so without `-b` it resolves zero input

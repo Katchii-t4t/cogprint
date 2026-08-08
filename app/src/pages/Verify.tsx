@@ -16,14 +16,19 @@ type Phase = "verifying" | "done" | "invalid";
 export default function Verify() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
-  const [phase, setPhase] = useState<Phase>("verifying");
+  // "no token in the link" is knowable at first render, so it is initial state
+  // rather than something an effect discovers and then corrects — which cost a
+  // render pass showing a spinner for a link that was never going to work.
+  const [phase, setPhase] = useState<Phase>(() =>
+    params.get("token") ? "verifying" : "invalid"
+  );
   // React 18 mounts effects twice in dev StrictMode; the token is single-use,
   // so a second redemption would fail a link that actually worked.
   const redeemed = useRef(false);
 
   useEffect(() => {
     const token = params.get("token");
-    if (!token) { setPhase("invalid"); return; }
+    if (!token) return;
     if (redeemed.current) return;
     redeemed.current = true;
 

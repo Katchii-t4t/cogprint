@@ -51,7 +51,7 @@ export default class ErrorBoundary extends Component<Props, State> {
 
     // Read at render rather than in state: if storage itself is what failed,
     // this must not be the thing that throws again.
-    let recoveryKey: string | null = null;
+    let recoveryKey: string | null;
     try {
       recoveryKey = getState().recoveryKey;
     } catch {
