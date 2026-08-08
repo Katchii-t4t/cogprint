@@ -166,6 +166,16 @@ def test_production_refuses_to_start_without_an_api_key(monkeypatch):
     auth_module.assert_production_config()  # must not raise
 
 
+def test_health_reports_the_database_not_just_the_process(client):
+    """OPS-008. The platform routes traffic on this. A check that only proves
+    the process is alive sends users into an instance whose database is
+    unreachable, which then fails per-user with no signal that the deploy is
+    broken."""
+    r = client.get("/health")
+    assert r.status_code == 200
+    assert r.json()["database"] == "ok"
+
+
 def test_development_keeps_the_zero_config_promise(monkeypatch):
     import auth as auth_module
 

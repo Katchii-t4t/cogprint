@@ -12,6 +12,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from auth import (
@@ -1734,5 +1735,20 @@ def send_review_reminders(db: Session = Depends(get_db)):
 
 
 @app.get("/health")
-def health():
-    return {"status": "ok", "service": "CogPrint API"}
+def health(db: Session = Depends(get_db)):
+    """Liveness *and* readiness.
+
+    The platform routes traffic based on this. A check that only proves the
+    process is alive will happily send users into an instance whose database
+    is unreachable — which then fails on the first real query, per user, with
+    no signal anywhere that the deploy is broken.
+
+    503 rather than 500 so the platform treats it as "not ready" and holds
+    traffic off rather than counting it as an application error.
+    """
+    try:
+        db.execute(text("SELECT 1"))
+    except Exception:
+        logger.exception("health check: database unreachable")
+        raise HTTPException(status_code=503, detail="Database unavailable.")
+    return {"status": "ok", "service": "CogPrint API", "database": "ok"}

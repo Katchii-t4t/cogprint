@@ -145,8 +145,13 @@ class StudySession(Base):
     __tablename__ = "study_sessions"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    material_id = Column(Integer, ForeignKey("materials.id"), nullable=True)
+    # Indexed because every read of this table filters by one of them and none
+    # of these queries can use the primary key: the fingerprint rebuild loads a
+    # user's whole history on every session, and the library groups by
+    # material. Unindexed, both are full scans — invisible at 20 users, a cliff
+    # at 10,000.
+    user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    material_id = Column(Integer, ForeignKey("materials.id"), index=True, nullable=True)
     created_at = Column(DateTime, default=utcnow, nullable=False)
     technique = Column(Enum(StudyTechnique), nullable=False)
     duration_minutes = Column(Integer, nullable=False)
@@ -164,8 +169,10 @@ class RetentionCheck(Base):
     __tablename__ = "retention_checks"
 
     id = Column(Integer, primary_key=True, index=True)
-    session_id = Column(Integer, ForeignKey("study_sessions.id"), nullable=False)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    # The rebuild fetches every check for a user's sessions with an IN clause,
+    # and the duplicate-check guard looks up by session. Both scan without these.
+    session_id = Column(Integer, ForeignKey("study_sessions.id"), index=True, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
     checked_at = Column(DateTime, default=utcnow, nullable=False)
     check_type = Column(String(10), nullable=False)  # "24h" or "7d"
     score = Column(Float, nullable=False)  # 0.0–1.0
@@ -234,7 +241,9 @@ class AnalyticsEvent(Base):
     id = Column(Integer, primary_key=True, index=True)
     # Nullable: the funnel starts before an account exists, and that leading
     # edge is exactly the population worth measuring.
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    # Indexed: the D1/D7 funnel groups by user across the whole table, which is
+    # the fastest-growing table in the schema.
+    user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=True)
     event_name = Column(String(64), index=True, nullable=False)
     properties_json = Column(Text, nullable=True)
     created_at = Column(DateTime, default=utcnow, index=True, nullable=False)
