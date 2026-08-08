@@ -41,6 +41,36 @@ Everything else is quality, polish, or future work.
 
 ---
 
+## 0b. Progress log
+
+Updated as items land, so an interrupted session loses nothing. Each entry
+names the commit that closed it.
+
+| ID | Status | Commit |
+|---|---|---|
+| SEC-001 anonymous read/write by id | **DONE** | `aa0ea9e` |
+| SEC-004 unbounded input sizes | **DONE** | `9a9524c` |
+| SEC-002 auth fails open in prod | **DONE** | `445ff3c` |
+| COR-005 deprecated startup hook | **DONE** | `445ff3c` |
+| OPS-002 missing indexes | **DONE** | `7801f62` |
+| OPS-008 health ignores the database | **DONE** | `7801f62` |
+| FE-003 no error boundary | **DONE** | `2416ff4` |
+| SEC-003 rate limiter per-process | open | — |
+| SEC-005 events accept any user_id | open | — |
+| SEC-006 share codes mintable / eternal | partly — minting fixed by SEC-001; expiry open | `aa0ea9e` |
+| SEC-007 CORS allow_credentials | open | — |
+| SEC-008 Docker runs as root | open | — |
+| SEC-009 no dependency pinning | open | — |
+| SEC-010 npm advisories | open | — |
+| COR-001 advice text still hardcodes claims | open | — |
+| COR-002 two estimators shown as one claim | open | — |
+| COR-003 no sample size in eff_map | open | — |
+| COR-004 non-deterministic rebuild | open | — |
+| COR-006 lint failing, not in CI | open | — |
+| everything else | open | — |
+
+---
+
 ## 1. Severity definitions
 
 - **BLOCKER** — must be fixed before any real user touches the product.
