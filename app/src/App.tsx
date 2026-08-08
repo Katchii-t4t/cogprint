@@ -1,5 +1,6 @@
 import { Suspense, lazy } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import ErrorBoundary from "./components/ErrorBoundary";
 import Paste from "./pages/Paste";
 
 // Perf (§6): the paste screen is the app's front door and stays in the main
@@ -24,6 +25,10 @@ function RouteFallback() {
 export default function App() {
   return (
     <BrowserRouter>
+      {/* Inside the router so the fallback can navigate, outside Suspense so a
+          failed lazy chunk — an offline PWA with a stale service worker is the
+          realistic case — lands here rather than on a blank screen. */}
+      <ErrorBoundary>
       <Suspense fallback={<RouteFallback />}>
         <Routes>
           <Route path="/" element={<Paste />} />
@@ -37,6 +42,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>
+      </ErrorBoundary>
     </BrowserRouter>
   );
 }
