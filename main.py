@@ -10,7 +10,7 @@ from typing import List, Optional
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from auth import (
@@ -1569,6 +1569,22 @@ class ClientEvent(BaseModel):
     event_name: str = Field(min_length=1, max_length=64)
     user_id: Optional[int] = None
     properties: Optional[dict] = None
+
+    @field_validator("properties")
+    @classmethod
+    def _bounded(cls, v):
+        """Reject an oversized property bag.
+
+        Events are the instrument the beta exists to read, and the endpoint is
+        deliberately cheap to call, so the dict is an unbounded write into the
+        database unless something caps it. Serialised size rather than key
+        count, because one long string is the easy abuse.
+        """
+        if v is None:
+            return v
+        if len(json.dumps(v, default=str)) > 4096:
+            raise ValueError("properties too large")
+        return v
 
 
 @app.post("/events", status_code=202)

@@ -40,16 +40,29 @@ class RetentionCheckCreate(BaseModel):
         return v
 
 
+# Roughly a 40,000-word chapter. Chosen as the largest thing a person plausibly
+# studies in one go, not as the largest thing the analyzer survives: the TF-IDF
+# → SVD → TextRank pipeline grows superlinearly in sentence count, so an
+# unbounded field on an endpoint anyone can call is a CPU sink and an unbounded
+# storage bill at the same time. A real paste is 2–20k characters.
+MAX_MATERIAL_CHARS = 200_000
+MAX_TITLE_CHARS = 200
+
+# ~6 MB decoded — a phone photo, generously. Vision OCR is billed per image, so
+# this is a spend control before it is an abuse control.
+MAX_IMAGE_BASE64_CHARS = 8_000_000
+
+
 class MaterialCreate(BaseModel):
-    title: str
-    raw_text: str
+    title: str = Field(min_length=1, max_length=MAX_TITLE_CHARS)
+    raw_text: str = Field(min_length=1, max_length=MAX_MATERIAL_CHARS)
 
 
 class OcrRequest(BaseModel):
     """A photo of notes/textbook to transcribe (base64, no data-URL prefix)."""
 
-    image_base64: str
-    media_type: str  # one of agents.material_ocr.ALLOWED_MEDIA_TYPES
+    image_base64: str = Field(min_length=1, max_length=MAX_IMAGE_BASE64_CHARS)
+    media_type: str = Field(min_length=1, max_length=100)  # see agents.material_ocr.ALLOWED_MEDIA_TYPES
 
 
 class OcrResponse(BaseModel):
