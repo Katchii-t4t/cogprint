@@ -505,10 +505,27 @@ def _rank_recommended_techniques(
     priors.py existed precisely to prevent that, but it only ever reached the
     planner, never this field — which is the one the fingerprint screen reads.
     """
-    raw_7d = {
-        t.technique: t.avg_retention_7d or t.avg_retention_24h or t.avg_immediate_score or 0.0
-        for t in tech_stats
-    }
+    def _measured(t) -> float:
+        """This technique's measured retention, preferring the longer delay.
+
+        Explicit None checks, not `a or b or c`. A measured retention of
+        exactly 0.0 — the user remembered nothing — is falsy, so the chain fell
+        through to the 24h value and then to the *immediate* quiz score. A
+        technique someone had completely forgotten a week later would therefore
+        be ranked by how well they did on the day, which is precisely backwards
+        and would promote it up the recommendation list.
+
+        Immediate score is excluded outright for the same reason it is excluded
+        in the planner: it measures encoding, not forgetting, and it is where
+        the fluency illusion lives.
+        """
+        if t.avg_retention_7d is not None:
+            return float(t.avg_retention_7d)
+        if t.avg_retention_24h is not None:
+            return float(t.avg_retention_24h)
+        return 0.0
+
+    raw_7d = {t.technique: _measured(t) for t in tech_stats}
 
     # Include every technique we hold a prior for, so a cold-start ranking is
     # complete rather than limited to whatever the bandit happens to know about.

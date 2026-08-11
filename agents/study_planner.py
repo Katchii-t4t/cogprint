@@ -99,7 +99,11 @@ def _best_technique(fp: FingerprintProfile) -> str:
     if fp.recommended_techniques:
         return fp.recommended_techniques[0]
     if fp.technique_effectiveness:
-        best = max(fp.technique_effectiveness, key=lambda t: _delayed_retention(t) or 0.0)
+        def _score(t) -> float:
+            r = _delayed_retention(t)
+            return 0.0 if r is None else r
+
+        best = max(fp.technique_effectiveness, key=_score)
         return best.technique
     return _DEFAULT_TECHNIQUE
 
@@ -435,7 +439,10 @@ def _rationale(
             f"First exposure to '{concept}' — using {tech_label} for initial encoding. "
             f"Estimated stability without prior data: {S:.0f} days."
         )
-    pct = round((1.0 - (R or 1.0)) * 100)
+    # `R or 1.0` would read a predicted retention of exactly 0.0 — total
+    # forgetting, the most urgent case there is — as "no estimate", and print
+    # "0% forgetting predicted" next to it.
+    pct = round((1.0 - (1.0 if R is None else R)) * 100)
     return (
         f"Review scheduled for '{concept}': {pct}% forgetting predicted "
         f"({lag} days since last study, S≈{S:.0f}d). "
@@ -577,7 +584,7 @@ class StudyPlanner:
         # fading most. New introductions are skipped (the queue is drained).
         resuming = prior_sessions > 0
         if resuming:
-            lag0 = int(round(days_since_last_study or 0.0))
+            lag0 = int(round(0.0 if days_since_last_study is None else days_since_last_study))
             for c in ordered_concepts:
                 seen.add(c.concept)
                 last_studied[c.concept] = -lag0   # studied lag0 days before day 0
@@ -702,7 +709,7 @@ class StudyPlanner:
         material_profile = _material_profile(knowledge_map)
         resume_note = ""
         if resuming:
-            gap = int(round(days_since_last_study or 0.0))
+            gap = int(round(0.0 if days_since_last_study is None else days_since_last_study))
             when = "earlier today" if gap == 0 else f"{gap} day{'s' if gap != 1 else ''} ago"
             resume_note = (
                 f"Resuming: you last studied this {when}. "

@@ -122,8 +122,12 @@ def build_context(
     # [0] intercept
     x[0] = 1.0
 
-    # [1] sleep: 7h is the neutral/healthy baseline
-    x[1] = np.clip((sleep_hours or 7.0) / 10.0, 0.0, 1.0)
+    # [1] sleep: 7h is the neutral/healthy baseline.
+    # `sleep_hours or 7.0` would rewrite a logged 0 — a genuinely sleepless
+    # night, and a legal input — into a healthy 7, feeding the model data the
+    # user never reported. Sleep is also one of the conditions the fingerprint
+    # reports back, so the fabrication would come out of the other end as advice.
+    x[1] = np.clip((7.0 if sleep_hours is None else sleep_hours) / 10.0, 0.0, 1.0)
 
     # [2] stress (inverted): 1/5 = 1.0 (no stress → good learning), 5/5 = 0.0
     sl = stress_level if stress_level is not None else 3.0
@@ -138,7 +142,9 @@ def build_context(
         x[3] = x[4] = x[5] = x[6] = 0.25
 
     # [7] duration: 90-minute session is roughly the cognitive limit
-    x[7] = np.clip((duration_minutes or 45.0) / 90.0, 0.0, 1.0)
+    x[7] = np.clip(
+        (45.0 if duration_minutes is None else duration_minutes) / 90.0, 0.0, 1.0
+    )
 
     # [8] session number: log-compress so early sessions get high exploration,
     #     later sessions approach 1.0 asymptotically
