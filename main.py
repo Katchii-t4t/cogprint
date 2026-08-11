@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from typing import List, Optional
 
-from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
@@ -859,16 +859,28 @@ def force_rebuild_fingerprint(user_id: int, db: Session = Depends(get_db)):
 def analyze_material(body: MaterialCreate, db: Session = Depends(get_db)):
     from agents.material_analyzer import MaterialAnalyzer
 
-    material = Material(title=body.title, raw_text=body.raw_text)
-    db.add(material)
-    db.commit()
-    db.refresh(material)
-
+    # Analyse BEFORE writing. A paste the analyzer cannot find a single concept
+    # in — whitespace, a stray character, punctuation, emoji — used to create a
+    # Material row, return 201 and land the user on an empty knowledge map with
+    # no explanation and nothing to do. Saying so is both better for them and
+    # keeps unusable rows out of the table.
     analyzer = MaterialAnalyzer()
     knowledge_map = analyzer.analyze(body.title, body.raw_text)
 
+    if knowledge_map.total_concepts == 0:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Couldn't find anything to study in that text. Paste a few "
+                "sentences of notes or a chapter and try again."
+            ),
+        )
+
+    material = Material(title=body.title, raw_text=body.raw_text)
     material.knowledge_map_json = knowledge_map.model_dump_json()
+    db.add(material)
     db.commit()
+    db.refresh(material)
 
     # No user_id: analysis happens before signup on a first visit, and that
     # pre-account edge is the part of the funnel most worth seeing.
@@ -984,7 +996,12 @@ def _cards_out(stored: "StoredQuestions", include_flagged: bool) -> list:
 @app.post("/materials/{material_id}/questions", response_model=QuestionSetResponse)
 def generate_questions(
     material_id: int,
-    n: int = 8,
+    # Bounded for the same reason as total_days, and because this is the
+    # endpoint that can cost money: with a key configured, n is the number of
+    # cards an LLM is asked to write. n=0 and n=-1 previously returned a single
+    # card rather than an error, which quietly told the client its request had
+    # been understood.
+    n: int = Query(8, ge=1, le=50),
     refresh: bool = False,
     include_flagged: bool = False,
     db: Session = Depends(get_db),
@@ -1102,7 +1119,15 @@ def flag_question(material_id: int, body: FlagQuestionRequest, db: Session = Dep
 def generate_study_plan(
     user_id: int,
     material_id: int,
-    total_days: int = 14,
+    # Bounded, and not cosmetically. total_days was unbounded: ?total_days=100000
+    # generated a hundred thousand plan days — a 45 MB response after 8.8s of
+    # CPU, from one request. A few of those in parallel take the service down.
+    # 0 and negative were accepted too, returning an empty plan under a heading
+    # that promised fourteen days.
+    #
+    # 90 is a semester, which is the longest horizon the Ebbinghaus schedule
+    # says anything useful about anyway.
+    total_days: int = Query(14, ge=1, le=90),
     target_date: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
@@ -1625,7 +1650,9 @@ def record_client_event(body: ClientEvent, db: Session = Depends(get_db)):
 
 
 @app.get("/analytics/funnel", dependencies=[Depends(require_api_key)])
-def analytics_funnel(days: int = 30, db: Session = Depends(get_db)):
+def analytics_funnel(
+    days: int = Query(30, ge=1, le=365), db: Session = Depends(get_db)
+):
     """Event counts and return rates — the instrument for the beta's question.
 
     D1/D7 are computed per user relative to that user's own first activity, not

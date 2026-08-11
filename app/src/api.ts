@@ -49,10 +49,49 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
     },
   });
   if (!res.ok) {
-    const text = await res.text().catch(() => res.statusText);
-    throw new Error(`${res.status}: ${text}`);
+    throw new ApiError(res.status, await readErrorMessage(res));
   }
   return res.json();
+}
+
+/**
+ * An API failure the UI can show a person.
+ *
+ * The status used to be glued onto the front of the raw response body, so
+ * every screen that rendered `e.message` showed the user something like
+ * `422: {"detail":"Couldn't find anything to study in that text."}` — a
+ * perfectly good message buried in JSON and a status code. Callers that need
+ * to branch on the code read `.status` instead of string-matching the prefix.
+ */
+export class ApiError extends Error {
+  // Written out rather than declared as a constructor parameter property:
+  // `erasableSyntaxOnly` is on in tsconfig, so the shorthand is rejected.
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
+async function readErrorMessage(res: Response): Promise<string> {
+  try {
+    const body = await res.text();
+    try {
+      const parsed = JSON.parse(body);
+      // FastAPI puts a human string in `detail` for HTTPException, and a list
+      // of field errors there for a 422 from validation. The list is for us,
+      // not for the user, so it gets a generic message instead.
+      if (typeof parsed?.detail === "string") return parsed.detail;
+      if (Array.isArray(parsed?.detail)) return "That request wasn't valid.";
+    } catch {
+      // Not JSON — a proxy error page or an empty body. Fall through.
+    }
+    return body.trim() || res.statusText || "Something went wrong.";
+  } catch {
+    return res.statusText || "Something went wrong.";
+  }
 }
 
 export const api = {

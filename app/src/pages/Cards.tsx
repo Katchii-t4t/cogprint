@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { api } from "../api";
+import { ApiError, api } from "../api";
 import { currentUserId, currentHour, lastMaterialId as storedMaterialId } from "../store";
 import { resolveMode } from "../study";
 import { track } from "../track";
@@ -105,10 +105,10 @@ export default function Cards() {
         setOptions(opts);
       })
       .catch((e) => {
-        if (e.message.startsWith("503")) {
+        if (e instanceof ApiError && e.status === 503) {
           setNeedsSetup(true);
         } else {
-          setError(e.message);
+          setError(e instanceof Error ? e.message : "Something went wrong.");
         }
       })
       .finally(() => setLoading(false));

@@ -172,14 +172,53 @@ describe("request construction", () => {
 });
 
 describe("error handling", () => {
-  it("throws with the status code so callers can distinguish 404 from 500", async () => {
+  it("surfaces the server's message, not a JSON blob with a status glued on", async () => {
+    // The user used to see, verbatim:
+    //   422: {"detail":"Couldn't find anything to study in that text."}
+    // — a perfectly good sentence buried in JSON and a status code, on the
+    // front door of the product.
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ detail: "Couldn't find anything to study in that text." },
+        { ok: false, status: 422 })
+    );
+    await expect(api.analyzeMaterial("t", "...")).rejects.toThrow(
+      "Couldn't find anything to study in that text."
+    );
+  });
+
+  it("carries the status so callers can branch without parsing prose", async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse({ detail: "nope" }, { ok: false, status: 404 })
     );
-    await expect(api.getFingerprint(1)).rejects.toThrow(/404/);
+    await expect(api.getFingerprint(1)).rejects.toMatchObject({
+      name: "ApiError",
+      status: 404,
+    });
   });
 
-  it("still throws when the error body is not readable", async () => {
+  it("does not show a validation error list to the user", async () => {
+    // FastAPI's 422 body is a list of field errors — useful in a log, useless
+    // and alarming on screen.
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ detail: [{ loc: ["body", "raw_text"], msg: "too long" }] },
+        { ok: false, status: 422 })
+    );
+    await expect(api.analyzeMaterial("t", "x")).rejects.toThrow(/wasn't valid/);
+  });
+
+  it("falls back to something sayable when the body is not JSON", async () => {
+    // A proxy or gateway error page, which is HTML.
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 502,
+      statusText: "Bad Gateway",
+      text: async () => "",
+      json: async () => ({}),
+    });
+    await expect(api.getFingerprint(1)).rejects.toThrow("Bad Gateway");
+  });
+
+  it("still throws when the error body cannot be read at all", async () => {
     fetchMock.mockResolvedValueOnce({
       ok: false,
       status: 503,
@@ -189,7 +228,7 @@ describe("error handling", () => {
       },
       json: async () => ({}),
     });
-    await expect(api.getFingerprint(1)).rejects.toThrow(/503/);
+    await expect(api.getFingerprint(1)).rejects.toMatchObject({ status: 503 });
   });
 
   it("propagates a network failure rather than resolving with nothing", async () => {

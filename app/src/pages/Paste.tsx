@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { api } from "../api";
+import { ApiError, api } from "../api";
 import { track } from "../track";
 import {
   addRecent, dismissNudge, getState, nudgeAllowed, setState,
@@ -70,9 +70,8 @@ export default function Paste() {
       setText(r.text);
       setPhase("idle"); // land the text in the textarea so the user can glance/edit
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "";
       setError(
-        msg.startsWith("503")
+        e instanceof ApiError && e.status === 503
           ? "Photo scanning needs setup — the AI key isn't configured on this server yet. You can still paste text."
           : "Couldn't read that photo. Try a clearer shot, or paste the text instead."
       );
@@ -94,9 +93,8 @@ export default function Paste() {
       setState({ userId: user.id, group: user.group, recoveryKey: key });
       navigate("/grow");
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "";
       setRestoreErr(
-        msg.startsWith("429")
+        e instanceof ApiError && e.status === 429
           ? "Too many attempts. Wait a few minutes and try again."
           : "That key doesn't match an account. Check for a missing character."
       );
