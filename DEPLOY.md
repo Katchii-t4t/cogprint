@@ -26,7 +26,11 @@ a real server + database. Render reads `render.yaml` and provisions both.
    `DATABASE_URL` automatically.
 3. In the service's **Environment**, set the secrets that are `sync: false`:
    - `COGPRINT_API_KEY` — a long random string (guards bulk-data endpoints and
-     the research analytics view). **Set this before any public traffic.**
+     the research analytics view). **The service will refuse to boot without
+     it**, because `render.yaml` sets `COGPRINT_ENV=prod`. If your first deploy
+     crashes on startup with a message naming this variable, that is the
+     safeguard working, not a broken build — set the value and redeploy.
+     Generate one with: `python -c "import secrets; print(secrets.token_urlsafe(32))"`
    - `CORS_ORIGINS` — your frontend URL(s), e.g. `https://cogprint.vercel.app` (fill in after Step 2).
    - `FRONTEND_URL` — same value; this is where emailed sign-in links point.
      Without it links point at `localhost` and won't work for anyone else.
@@ -37,7 +41,11 @@ a real server + database. Render reads `render.yaml` and provisions both.
      verified sending domain.
    - `ANTHROPIC_API_KEY` — optional; upgrades flashcards from local cloze cards
      to LLM-written ones, and enables photo OCR. Leave unset to launch without it.
-4. Deploy. Confirm `https://<your-api>.onrender.com/health` returns `{"status":"ok"}`.
+4. Deploy. Confirm `https://<your-api>.onrender.com/health` returns
+   `{"status":"ok","service":"CogPrint API","database":"ok"}`. The `database`
+   field is the one that matters — the check runs a real query, so a 503 here
+   means the app is up but cannot reach Postgres, which is a different problem
+   from the app being down.
 
 > The `Dockerfile` installs `psycopg[binary]` so Postgres works in prod; local dev
 > still uses SQLite via the default `DATABASE_URL`. No code change needed —
@@ -56,9 +64,32 @@ Directory `frontend`, add a `frontend/vercel.json` mirroring the app's if missin
 
 ## Step 3 — Smoke test the live stack
 
-- Open the Vercel URL, paste some text → should analyze and build a plan.
-- `curl https://<api>/health` → ok.
-- Flashcards will show the "needs setup" screen unless `ANTHROPIC_API_KEY` is set.
+Do these in order. Each one fails differently, so a failure tells you which
+step was wrong rather than just "it's broken".
+
+1. `curl https://<api>/health` → `"database":"ok"`.
+2. Open the Vercel URL and click **"Try a sample"** then **Analyse**. You should
+   land on a 14-day plan. If this hangs, it is almost always `CORS_ORIGINS` not
+   matching your Vercel URL exactly (scheme included, no trailing slash) — the
+   browser console will say so plainly.
+3. Finish one flashcard round. You should land on the fingerprint screen with a
+   score. **If the plan loads but the fingerprint 401s**, the client is not
+   sending its recovery token: check that the sign-up response was persisted
+   (Application → Local Storage → `cogprint_app_v1` should contain
+   `recoveryKey`).
+4. Verify the enumeration guard is live in production — this is the one check
+   worth doing by hand, because it is the difference between a private beta and
+   a data breach:
+
+   ```
+   curl -i https://<api>/users/1/materials
+   ```
+
+   Must return **401**. If it returns 200 with data, stop and do not invite
+   anyone.
+
+- Flashcards will show local cloze cards unless `ANTHROPIC_API_KEY` is set;
+  that is the intended free path, not a failure.
 
 ## Step 4 — Daily review reminders (recommended)
 

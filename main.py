@@ -131,7 +131,16 @@ CORS_ORIGINS = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
-    allow_credentials=True,
+    # False on purpose, and coupled to how auth works: the client proves who it
+    # is with an Authorization header it sets itself, never with a cookie. With
+    # no cookie in play there is nothing for a cross-site request to ride on,
+    # so this closes the CSRF surface entirely rather than relying on the
+    # origin list alone.
+    #
+    # If a cookie is ever introduced, this line has to be revisited together
+    # with it — allow_credentials=True plus a permissive origin list is the
+    # classic way to hand an attacker authenticated requests.
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
