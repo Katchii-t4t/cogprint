@@ -59,6 +59,11 @@ names the commit that closed it.
 | COR-006 lint failing, not in CI | **DONE** | `cb2e415` |
 | TEST-001 lint + audit not gated in CI | **DONE** | `cb2e415` |
 | COR-002 two estimators shown as one claim | **DONE** | `80b7363` |
+| SEC-007 CORS allow_credentials | **DONE** | `6c96cc8` |
+| NEW-001 unbounded query params (45 MB / 8.8s DoS) | **DONE** | `02f178a` |
+| NEW-002 unusable pastes accepted, empty screen | **DONE** | `02f178a` |
+| NEW-003 API errors shown to users as raw JSON | **DONE** | `02f178a` |
+| NEW-004 falsy-zero fallbacks on measured values | **DONE** | `8b42a1c` |
 | SEC-006 share codes mintable / eternal | partly — minting fixed by SEC-001; expiry open | `aa0ea9e` |
 | SEC-003 rate limiter per-process | open | — |
 | SEC-005 events accept any user_id | open | — |
@@ -73,6 +78,16 @@ names the commit that closed it.
 **Commercialisation gate: 8 of 11 code items cleared.** Remaining code work:
 SEC-009 (pin dependencies), OPS-005 (backups with a tested restore), TEST-002
 (one end-to-end journey test). OPS-001 (deploy) and LEGAL-001 are Katchi's.
+
+The NEW-* items above were found by probing a running instance with edge cases
+rather than by reading, after the original audit was written. **That is the
+method worth repeating**: the API returned zero 500s across ~40 hostile inputs,
+so nothing crashed — but five defects of the "accepts nonsense, produces
+nonsense" class were sitting behind that clean result, including a
+45 MB-response denial of service reachable by any signed-up user.
+
+`AUDIT.md` is written from reading; reading found the authorization hole.
+Probing found the input handling. Neither method finds the other's bugs.
 
 ---
 
